@@ -36,6 +36,9 @@ export default function InvoiceMatch() {
   const [lines, setLines] = useState<InvoiceLine[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [onlyIssue, setOnlyIssue] = useState(false);
+  const [onlyNoCat, setOnlyNoCat] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkCat, setBulkCat] = useState('');
 
   useEffect(() => {
     if (inv0 && !lines) setLines(structuredClone(inv0.lines));
@@ -69,6 +72,7 @@ export default function InvoiceMatch() {
       await audit(apply ? '업체 거래명세 원장 반영' : '계산서 매칭 저장', inv.id, { ok: sum.ok, total: sum.total });
       toast(apply ? '투입원장에 반영했습니다.' : '저장했습니다. 투입원장도 다시 계산했습니다.');
       setLines(null);
+      setPicked(new Set());
     } catch (e) {
       toast(errMsg(e), 'err');
     } finally {
@@ -76,7 +80,26 @@ export default function InvoiceMatch() {
     }
   };
 
-  const shown = lines.map((l, i) => ({ l, i })).filter(({ l }) => !onlyIssue || (l.matchStatus === 'unmatched' && l.matchIssue));
+  const shown = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => (!onlyIssue || (l.matchStatus === 'unmatched' && l.matchIssue)) && (!onlyNoCat || !l.siteCategoryId));
+  const allPicked = shown.length > 0 && shown.every(({ i }) => picked.has(i));
+  const togglePick = (i: number) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(i)) n.delete(i);
+      else n.add(i);
+      return n;
+    });
+  /** 체크한 줄 일괄 변경 */
+  const applyBulk = (patch: (l: InvoiceLine) => Partial<InvoiceLine>) => {
+    setLines((ls) => ls && ls.map((l, j) => (picked.has(j) ? { ...l, ...patch(l) } : l)));
+    toast(`${picked.size}줄을 바꿨습니다. 확인 후 저장하세요.`);
+    setPicked(new Set());
+    setBulkCat('');
+  };
+  const pickedLines = lines.filter((_, j) => picked.has(j));
+  const canAccept = pickedLines.some((l) => l.matchStatus === 'unmatched' && l.poId);
   const before = inv.month <= settings.cutoffMonth && !inv.submitted;
 
   return (
@@ -123,9 +146,38 @@ export default function InvoiceMatch() {
           <span className="font-semibold">계산서 줄 {lines.length}</span>
           {dirty && <span className="chip bg-amber-soft text-amber-800">저장 안 됨</span>}
           <label className="ml-auto flex items-center gap-1 text-[12px]">
-            <input type="checkbox" checked={onlyIssue} onChange={(e) => setOnlyIssue(e.target.checked)} /> 문제 있는 줄만
+            <input type="checkbox" checked={onlyNoCat} onChange={(e) => (setOnlyNoCat(e.target.checked), setPicked(new Set()))} /> 미분류만
+          </label>
+          <label className="flex items-center gap-1 text-[12px]">
+            <input type="checkbox" checked={onlyIssue} onChange={(e) => (setOnlyIssue(e.target.checked), setPicked(new Set()))} /> 문제 있는 줄만
           </label>
         </div>
+        {picked.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-amber-soft px-4 py-2 text-[12.5px]">
+            <span className="font-semibold">{picked.size}줄 선택</span>
+            <span className="text-muted">현장분류 →</span>
+            <select className="input h-7 w-48" value={bulkCat} onChange={(e) => setBulkCat(e.target.value)}>
+              <option value="">선택</option>
+              <option value="__none__">미분류로 되돌리기</option>
+              {siteCats.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <button className="btn-dark h-7 text-[12px]" disabled={!bulkCat} onClick={() => applyBulk(() => ({ siteCategoryId: bulkCat === '__none__' ? undefined : bulkCat }))}>
+              일괄 변경
+            </button>
+            {!before && canAccept && (
+              <button className="btn-ghost h-7 text-[12px]" title="발주가 연결된 문제 줄을 확인하고 그대로 인정" onClick={() => applyBulk((l) => (l.matchStatus === 'unmatched' && l.poId ? { matchStatus: 'manual', matchIssue: undefined } : {}))}>
+                일괄 인정
+              </button>
+            )}
+            <button className="ml-auto text-[12px] text-muted hover:text-ink" onClick={() => setPicked(new Set())}>
+              선택 해제
+            </button>
+          </div>
+        )}
         {!shown.length ? (
           <Empty>표시할 줄이 없습니다.</Empty>
         ) : (
@@ -133,6 +185,9 @@ export default function InvoiceMatch() {
             <table className="tbl">
               <thead>
                 <tr>
+                  <th className="w-8">
+                    <input type="checkbox" checked={allPicked} onChange={(e) => setPicked(e.target.checked ? new Set(shown.map(({ i }) => i)) : new Set())} />
+                  </th>
                   <th>입고일</th>
                   <th>발주일</th>
                   <th>품명</th>
@@ -153,7 +208,10 @@ export default function InvoiceMatch() {
                   const cur = cands.find((c) => c.po.id === l.poId && poLineKey(c.line) === l.poLineKey);
                   const ok = l.matchStatus === 'matched' || l.matchStatus === 'manual';
                   return (
-                    <tr key={i} className={l.matchStatus === 'unmatched' ? 'bg-red-50/40' : ''}>
+                    <tr key={i} className={picked.has(i) ? 'bg-amber-soft/60' : l.matchStatus === 'unmatched' ? 'bg-red-50/40' : ''}>
+                      <td>
+                        <input type="checkbox" checked={picked.has(i)} onChange={() => togglePick(i)} />
+                      </td>
                       <td className="whitespace-nowrap">{l.receivedDate}</td>
                       <td className="whitespace-nowrap text-muted">{l.orderDate}</td>
                       <td>{l.itemName}</td>
