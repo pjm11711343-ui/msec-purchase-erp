@@ -1,0 +1,129 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 구매관리 ERP 보안 규칙
+//
+// 주의: 이 Firebase 프로젝트는 단가관리시스템과 함께 씁니다.
+// 이 파일을 그대로 배포하면 기존 단가관리시스템 규칙이 지워집니다.
+// Firebase 콘솔 > Firestore > 규칙 에서 기존 규칙의 `match /databases/{database}/documents {` 안쪽에
+// 아래 "ERP 시작" ~ "ERP 끝" 사이를 붙여 넣으세요. (README 4번)
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== ERP 시작 =====
+    function erpSignedIn() { return request.auth != null; }
+    function erpUserPath() { return /databases/$(database)/documents/erp_users/$(request.auth.uid); }
+    function erpBootPath() { return /databases/$(database)/documents/erp_settings/bootstrap; }
+    function erpUser() { return get(erpUserPath()).data; }
+    function isErp() { return erpSignedIn() && exists(erpUserPath()) && erpUser().active == true; }
+    function isOffice() { return isErp() && erpUser().role in ['admin', 'material']; }
+    function isAdmin() { return isErp() && erpUser().role == 'admin'; }
+    function hasSite(siteId) { return isOffice() || (isErp() && siteId in erpUser().siteIds); }
+    // 협력업체 포털 계정
+    function vendorPath() { return /databases/$(database)/documents/erp_vendorAccounts/$(request.auth.uid); }
+    function isVendor() { return erpSignedIn() && exists(vendorPath()) && get(vendorPath()).data.active == true; }
+    function myVendor() { return get(vendorPath()).data.vendorId; }
+
+    match /erp_users/{uid} {
+      allow read: if erpSignedIn() && (request.auth.uid == uid || isErp());
+      // 관리자가 만들거나, 최초 설치 때 첫 관리자 본인이 bootstrap 문서와 함께 만든다
+      allow create: if isAdmin()
+        || (erpSignedIn() && request.auth.uid == uid
+            && request.resource.data.role == 'admin'
+            && !exists(erpBootPath())
+            && existsAfter(erpBootPath())
+            && getAfter(erpBootPath()).data.adminUid == uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /erp_settings/bootstrap {
+      allow get: if true;
+      allow create: if erpSignedIn()
+        && !exists(erpBootPath())
+        && request.resource.data.adminUid == request.auth.uid
+        && getAfter(erpUserPath()).data.role == 'admin';
+      allow update, delete: if false;
+    }
+    match /erp_settings/{id} {
+      allow read: if isErp();
+      allow write: if isAdmin() && id != 'bootstrap';
+    }
+
+    match /erp_sites/{id} {
+      allow read: if isErp() || isVendor();
+      allow write: if isOffice();
+    }
+    match /erp_vendors/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
+    match /erp_standardCategories/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
+    match /erp_siteCategories/{id} {
+      allow read: if hasSite(resource.data.siteId);
+      allow write: if isOffice();
+    }
+    match /erp_inputLedger/{id} {
+      allow read: if hasSite(resource.data.siteId);
+      allow write: if isOffice();
+    }
+    match /erp_invoices/{id} {
+      allow read: if isOffice() || (isVendor() && resource.data.vendorId == myVendor());
+      allow create: if isOffice()
+        || (isVendor() && request.resource.data.vendorId == myVendor()
+            && request.resource.data.source == 'portal' && request.resource.data.appliedToLedger == false);
+      allow update: if isOffice();
+      allow delete: if isOffice()
+        || (isVendor() && resource.data.vendorId == myVendor() && resource.data.source == 'portal' && resource.data.appliedToLedger == false);
+    }
+    match /erp_approvalLines/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
+    // 단가관리시스템 단가(vendors/{업체}/prices)를 ERP 사내 사용자가 읽기 — 컬렉션 그룹 조회용
+    match /{path=**}/prices/{priceId} {
+      allow read: if isErp();
+    }
+    match /erp_requisitions/{id} {
+      allow read: if hasSite(resource.data.siteId);
+      allow create: if hasSite(request.resource.data.siteId) && request.resource.data.createdBy == request.auth.uid;
+      allow update: if hasSite(resource.data.siteId) && request.resource.data.siteId == resource.data.siteId;
+      allow delete: if isOffice() || (resource.data.createdBy == request.auth.uid && resource.data.status in ['draft', 'rejected']);
+    }
+    match /erp_purchaseOrders/{id} {
+      allow read: if hasSite(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
+      allow create, delete: if isOffice();
+      allow update: if isOffice()
+        || (isVendor() && resource.data.vendorId == myVendor()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ackAt', 'ackBy']));
+    }
+    match /erp_receipts/{id} {
+      allow read: if hasSite(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
+      allow create: if hasSite(request.resource.data.siteId)
+        || (isVendor() && request.resource.data.vendorId == myVendor()
+            && request.resource.data.enteredBy == request.auth.uid
+            && get(/databases/$(database)/documents/erp_purchaseOrders/$(request.resource.data.poId)).data.vendorId == myVendor());
+      allow update: if isOffice()
+        || (hasSite(resource.data.siteId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirmed', 'confirmedByName', 'confirmedAt']));
+      allow delete: if isOffice()
+        || (isVendor() && resource.data.enteredBy == request.auth.uid && resource.data.get('confirmed', false) == false);
+    }
+    match /erp_vendorAccounts/{uid} {
+      allow read: if (erpSignedIn() && request.auth.uid == uid) || isOffice();
+      allow write: if isAdmin();
+    }
+    match /erp_auditLogs/{id} {
+      allow create: if isErp() && request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+    // ===== ERP 끝 =====
+
+    // 기존 단가관리시스템 규칙은 이 아래(또는 위)에 그대로 둡니다.
+  }
+}

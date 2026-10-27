@@ -1,0 +1,122 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Malgun Gothic', sans-serif;
+  --color-navy-950: #0a1220;
+  --color-navy-900: #111c2e;
+  --color-navy-800: #1a2740;
+  --color-navy-700: #26375a;
+  --color-amber-brand: #e8a33d;
+  --color-amber-soft: #fdf3e2;
+  --color-ink: #1b2433;
+  --color-muted: #6b7686;
+  --color-line: #e3e7ee;
+  --color-canvas: #f4f6f9;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-canvas text-ink font-sans antialiased;
+  font-size: 13px;
+}
+
+/* 데이터 표 공통 */
+.tbl {
+  @apply w-full border-collapse text-[12.5px];
+}
+.tbl th {
+  @apply sticky top-0 z-10 bg-[#f7f8fb] text-left font-semibold text-muted border-b border-line px-2.5 py-2 whitespace-nowrap;
+}
+.tbl td {
+  @apply border-b border-line px-2.5 py-1.5 align-middle;
+}
+.tbl tr:hover td {
+  @apply bg-amber-soft/50;
+}
+.tbl .num {
+  @apply text-right tabular-nums;
+}
+
+.input {
+  @apply h-8 rounded-md border border-line bg-white px-2.5 text-[13px] outline-none transition focus:border-amber-brand focus:ring-2 focus:ring-amber-brand/25;
+}
+.btn {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+}
+.btn-primary {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 bg-amber-brand text-navy-950 hover:brightness-95;
+}
+.btn-dark {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 bg-navy-950 text-white hover:bg-navy-800;
+}
+.btn-ghost {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 border border-line bg-white text-ink hover:bg-canvas;
+}
+.btn-danger {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 border border-red-200 bg-white text-red-600 hover:bg-red-50;
+}
+.card {
+  @apply rounded-2xl border border-line bg-white;
+}
+.chip {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-up {
+  animation: fade-up 0.18s ease-out;
+}
+
+/* 발주서 인쇄 / PDF 저장 */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+  html,
+  body,
+  #root {
+    height: auto !important;
+    background: #fff !important;
+  }
+  aside,
+  .no-print,
+  .fixed {
+    display: none !important;
+  }
+  #root > div {
+    display: block !important;
+    height: auto !important;
+  }
+  main {
+    overflow: visible !important;
+  }
+  main > div {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .po-sheet {
+    width: 100% !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  .po-sheet td,
+  .po-sheet th {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
