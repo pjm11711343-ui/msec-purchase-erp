@@ -198,10 +198,11 @@ export interface ParsedInvoiceFile {
   warnings: string[];
 }
 
-const INVOICE_SKIP = new Set(['작성방법', '계산서금액(갑지)', '..']);
 
 const HEADER_KEYS: Record<string, string> = {
   현장입고일자: 'receivedDate',
+  입고일자: 'receivedDate',
+  현장명: 'process', // 하자보수·가설 거래명세서는 공정 대신 현장명(작업 내용)을 적는다
   이월분: 'carryOver',
   제품회사명: 'maker',
   네고율: 'negoRate',
@@ -221,11 +222,13 @@ const HEADER_KEYS: Record<string, string> = {
 
 export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): ParsedInvoiceFile {
   const warnings: string[] = [];
+  // 거래명세서 시트만 읽는다 (현장별 정리 시트는 쓰지 않음)
+  const stmtSheets = wb.SheetNames.filter((sn) => sn.includes('거래명세서'));
+  if (!stmtSheets.length) throw new Error('계산서정리 파일이 아닙니다. 이름에 "거래명세서"가 들어간 시트가 없습니다.');
   const cover = wb.Sheets['계산서금액(갑지)'];
-  if (!cover) throw new Error('계산서정리 파일이 아닙니다. "계산서금액(갑지)" 시트가 있어야 합니다.');
 
-  // 갑지 1행: [월, 제목, '업체명:', 업체명, 버전]
-  const r1 = rows(cover)[0] ?? [];
+  // 갑지 1행: [월, 제목, '업체명:', 업체명, 버전] — 갑지가 없으면 거래명세서 3행(월 · 업체명)에서 찾는다
+  const r1 = cover ? (rows(cover)[0] ?? []) : [];
   let vendorName = '';
   let month = '';
   r1.forEach((v, i) => {
@@ -236,6 +239,13 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       vendorName = clean(String(next ?? ''));
     }
   });
+  for (const sn of stmtSheets) {
+    if (month && vendorName) break;
+    const r3 = rows(wb.Sheets[sn])[2] ?? [];
+    if (!month) month = parseYearMonth(String(r3[1] ?? '')) ?? '';
+    const v = clean(String(r3[8] ?? ''));
+    if (!vendorName && v && v !== '0') vendorName = v;
+  }
   if (!month) {
     const m = fileName.match(/(\d{2})\.(\d{2})/);
     if (m) month = `20${m[1]}-${m[2]}`;
@@ -245,8 +255,7 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
   const year = month ? Number(month.slice(0, 4)) : undefined;
 
   const sheets: ParsedInvoiceSheet[] = [];
-  for (const sn of wb.SheetNames) {
-    if (INVOICE_SKIP.has(sn) || sn.includes('거래명세서')) continue;
+  for (const sn of stmtSheets) {
     const ws = wb.Sheets[sn];
     const all = rows(ws);
     const hIdx = all.slice(0, 12).findIndex((r) => r.some((v) => nameKey(v) === '품명'));
@@ -258,6 +267,10 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       if (key && col[key] === undefined) col[key] = i;
     });
     if (col.itemName === undefined || col.qty === undefined) continue;
+    // 거래명세서 맨 오른쪽 '금액' 열 = 최종 청구 금액
+    const lastAmt = header.reduce<number>((a, h, i) => (nameKey(h) === '금액' ? i : a), -1);
+    if (lastAmt >= 0 && lastAmt !== col.amount) col.finalAmount = lastAmt;
+    let group = ''; // 공정은 묶음 첫 줄에만 적혀 있어 빈 줄이 나올 때까지 이어 쓴다
 
     const labelRow = all[2] ?? [];
     const labelCell = String(labelRow.find((v) => /^\s*\(/.test(String(v ?? ''))) ?? '');
@@ -267,7 +280,12 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
     const lines: InvoiceLine[] = [];
     for (const r of all.slice(hIdx + 1)) {
       const item = clean(String(get(r, 'itemName') ?? ''));
-      if (!item || item === '0') continue;
+      if (!item || item === '0') {
+        group = '';
+        continue;
+      }
+      const pv = get(r, 'process');
+      if (typeof pv === 'string' && clean(pv) && clean(pv) !== '0') group = clean(pv);
       const qty = num(get(r, 'qty'));
       const amount = num(get(r, 'amount'));
       if (!qty && !amount) continue;
@@ -275,7 +293,10 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       const chP = get(r, 'changedPrice');
       const chA = get(r, 'changedAmount');
       const hasChange = chA != null && chA !== '';
-      const finalAmount = hasChange
+      const fa = get(r, 'finalAmount');
+      const finalAmount = fa != null && fa !== ''
+        ? num(fa)
+        : hasChange
         ? num(chA)
         : chQ != null && chP != null && chQ !== '' && chP !== ''
           ? num(chQ) * num(chP)
@@ -297,10 +318,7 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
         changedAmount: hasChange ? num(chA) : undefined,
         finalAmount,
         categoryText: clean(String(get(r, 'categoryText') ?? '').replace(/\n/g, ' ')),
-        process: (() => {
-          const p = clean(String(get(r, 'process') ?? ''));
-          return p && p !== '0' ? p : undefined;
-        })(),
+        process: group || undefined,
         matchStatus: 'unmatched',
       };
       // undefined 필드는 Firestore 저장 시 오류가 나므로 제거
@@ -324,7 +342,7 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       categories: [...catMap].map(([text, v]) => ({ text, ...v })),
     });
   }
-  if (!sheets.length) warnings.push('입력된 거래 내역이 있는 현장 시트가 없습니다.');
+  if (!sheets.length) warnings.push('입력된 거래 내역이 있는 거래명세서 시트가 없습니다.');
   return { fileName, vendorName, month, sheets, warnings };
 }
 

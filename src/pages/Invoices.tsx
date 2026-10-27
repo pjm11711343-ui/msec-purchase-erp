@@ -327,7 +327,7 @@ export default function Invoices() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th>시트 (현장 표기)</th>
+                    <th>거래명세서 시트 (현장 표기)</th>
                     <th>ERP 현장</th>
                     <th className="num">줄</th>
                     <th className="num">금액</th>
