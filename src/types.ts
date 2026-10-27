@@ -56,6 +56,7 @@ export interface StandardCategory {
   name: string;
   order: number;
   trade: Trade;
+  aliases?: string[]; // 분류 원문 사전: 계산서 '분류' 칸에 이렇게 적혀 오면 이 표준분류로 본다
 }
 
 export interface SiteCategory {

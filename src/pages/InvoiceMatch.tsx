@@ -4,7 +4,8 @@ import { documentId, where } from 'firebase/firestore';
 import { useAuth } from '../auth/AuthContext';
 import { audit, useCollection, useSettings } from '../lib/db';
 import { C } from '../lib/firebase';
-import { useSiteCategories, useSites } from '../lib/hooks';
+import { useSiteCategories, useSites, useStandardCategories } from '../lib/hooks';
+import { suggestCats } from '../lib/catMatch';
 import { autoMatch, billedMap, candidatesFor, lineQty, linePrice, matchSummary, rebuildLedger } from '../lib/matching';
 import { won } from '../lib/normalize';
 import { usePurchaseOrders } from '../lib/pos';
@@ -28,6 +29,7 @@ export default function InvoiceMatch() {
   const receipts = useReceipts();
   const sites = useSites();
   const cats = useSiteCategories();
+  const std = useStandardCategories();
   const one = useCollection<Invoice>(C.invoices, [where(documentId(), '==', id ?? '_')], id ?? '');
   const inv0 = one.data[0];
   const sameVendor = useCollection<Invoice>(C.invoices, [where('vendorId', '==', inv0?.vendorId ?? '_')], inv0?.vendorId ?? '', !!inv0);
@@ -210,7 +212,16 @@ export default function InvoiceMatch() {
                             </option>
                           ))}
                         </select>
-                        {!l.siteCategoryId && l.categoryText && <div className="text-[10.5px] text-muted">원문: {l.categoryText}</div>}
+                        {!l.siteCategoryId && l.categoryText && (
+                          <div className="text-[10.5px] text-muted">
+                            원문: {l.categoryText}
+                            {suggestCats(l.categoryText, siteCats, std.data, 2).map((x) => (
+                              <button key={x.cat.id} className="ml-1 text-amber-700 hover:underline" title="비슷한 분류로 지정" onClick={() => setLine(i, { siteCategoryId: x.cat.id })}>
+                                → {x.cat.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {l.siteCategoryId && catName(l.siteCategoryId) === undefined && <div className="text-[10.5px] text-red-600">삭제된 분류</div>}
                       </td>
                     </tr>

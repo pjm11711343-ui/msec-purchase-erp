@@ -3,8 +3,9 @@ import { orderBy, where } from 'firebase/firestore';
 import { readWorkbook, parseInvoiceWorkbook, type ParsedInvoiceFile } from '../lib/parsers';
 import { audit, commitBatch, fetchWhere, newId, useCollection, useSettings } from '../lib/db';
 import { C } from '../lib/firebase';
-import { useSiteCategories, useSites, useVendors } from '../lib/hooks';
-import { categoryKey, looselyEqual, nameKey, won } from '../lib/normalize';
+import { useSiteCategories, useSites, useStandardCategories, useVendors } from '../lib/hooks';
+import { NO_CAT, resolveCat, stdOfText, suggestCats } from '../lib/catMatch';
+import { looselyEqual, nameKey, won } from '../lib/normalize';
 import { useAuth } from '../auth/AuthContext';
 import { autoMatch, matchSummary } from '../lib/matching';
 import { usePurchaseOrders } from '../lib/pos';
@@ -13,12 +14,12 @@ import { Link } from 'react-router-dom';
 import { Empty, errMsg, Modal, PageHeader, useToast } from '../components/ui';
 import type { Invoice, InvoiceLine, LedgerEntry, Site, SiteCategory, Vendor } from '../types';
 
-const NO_CAT = '(분류 없음)';
 const NEW_CAT = '__new__';
 
 interface SheetMap {
   siteId: string; // '' = 가져오지 않음
   catMap: Record<string, string>; // 분류 원문 → siteCategoryId ('' = 미분류)
+  picked?: string[]; // 한꺼번에 지정하려고 체크한 원문
 }
 interface FileState {
   parsed: ParsedInvoiceFile;
@@ -38,15 +39,6 @@ function guessSite(sites: Site[], sheetName: string, label: string): string {
   return hit[0]?.id ?? '';
 }
 
-function guessCat(cats: SiteCategory[], text: string): string {
-  if (text === NO_CAT) return '';
-  const nk = nameKey(text);
-  const byAlias = cats.find((c) => nameKey(c.name) === nk || c.aliases?.some((a) => nameKey(a) === nk));
-  if (byAlias) return byAlias.id;
-  const ck = categoryKey(text);
-  return cats.find((c) => categoryKey(c.name) === ck)?.id ?? '';
-}
-
 function findVendor(vendors: Vendor[], name: string): Vendor | undefined {
   const k = nameKey(name);
   return vendors.find((v) => nameKey(v.name) === k || v.aliases?.some((a) => nameKey(a) === k));
@@ -58,6 +50,7 @@ export default function Invoices() {
   const sites = useSites();
   const vendors = useVendors();
   const cats = useSiteCategories();
+  const std = useStandardCategories();
   const toast = useToast();
   const pos = usePurchaseOrders();
   const receipts = useReceipts();
@@ -88,7 +81,7 @@ export default function Invoices() {
           sheets: parsed.sheets.map((s) => {
             const siteId = guessSite(sites.data, s.sheetName, s.siteLabel);
             const catMap: Record<string, string> = {};
-            s.categories.forEach((c) => (catMap[c.text] = siteId ? guessCat(catsOf(siteId), c.text) : ''));
+            s.categories.forEach((c) => (catMap[c.text] = siteId ? resolveCat(c.text, catsOf(siteId), std.data) : ''));
             return { siteId, catMap };
           }),
         });
@@ -120,8 +113,9 @@ export default function Invoices() {
       for (const f of files)
         f.sheets.forEach((m) => {
           if (!m.siteId) return;
-          for (const [text, cid] of Object.entries(m.catMap)) {
-            if (cid !== NEW_CAT) continue;
+          for (const [text0, cid] of Object.entries(m.catMap)) {
+            if (cid !== NEW_CAT && !cid.startsWith(`${NEW_CAT}:`)) continue;
+            const text = cid === NEW_CAT ? text0 : cid.slice(NEW_CAT.length + 1);
             const key = `${m.siteId}|${nameKey(text)}`;
             if (!created.has(key)) {
               const id = newId(C.siteCategories);
@@ -130,7 +124,7 @@ export default function Invoices() {
               const data: Omit<SiteCategory, 'id'> = { siteId: m.siteId, name: text, aliases: [], order, contractAmount: 0, changeAmount: 0, execAmount: 0, migratedInput: 0, migratedMonth: settings.cutoffMonth };
               ops.push({ type: 'set', col: C.siteCategories, id, data });
             }
-            m.catMap[text] = created.get(key)!;
+            m.catMap[text0] = created.get(key)!;
           }
         });
 
@@ -236,6 +230,25 @@ export default function Invoices() {
         if (!c) return;
         const merged = new Set([...(c.aliases ?? []), ...[...set].filter((a) => nameKey(a) !== nameKey(c.name))]);
         if (merged.size !== (c.aliases ?? []).length) ops.push({ type: 'set', col: C.siteCategories, id: cid, data: { aliases: [...merged] } });
+      });
+      // 원문 사전 학습: 현장분류가 표준분류에 연결돼 있으면 그 원문을 표준분류에도 기억해 다른 현장에서도 자동으로 잡히게 한다
+      const stdAdd = new Map<string, Set<string>>();
+      catAlias.forEach((set, cid) => {
+        const sid = cats.data.find((x) => x.id === cid)?.standardCategoryId;
+        const st = sid ? std.data.find((x) => x.id === sid) : undefined;
+        if (!st) return;
+        for (const t of set) {
+          const owner = stdOfText(t, std.data);
+          if (owner && owner.id !== st.id) continue; // 이미 다른 표준분류로 묶인 원문은 건드리지 않음
+          if (owner?.id === st.id) continue;
+          const a = stdAdd.get(st.id) ?? new Set<string>();
+          a.add(t);
+          stdAdd.set(st.id, a);
+        }
+      });
+      stdAdd.forEach((set, sid) => {
+        const st = std.data.find((x) => x.id === sid)!;
+        ops.push({ type: 'set', col: C.standardCategories, id: sid, data: { aliases: [...new Set([...(st.aliases ?? []), ...set])] } });
       });
 
       await commitBatch(ops);
@@ -353,8 +366,8 @@ export default function Invoices() {
                             onChange={(e) => {
                               const siteId = e.target.value;
                               const catMap: Record<string, string> = {};
-                              s.categories.forEach((c) => (catMap[c.text] = siteId ? guessCat(catsOf(siteId), c.text) : ''));
-                              setM({ siteId, catMap });
+                              s.categories.forEach((c) => (catMap[c.text] = siteId ? resolveCat(c.text, catsOf(siteId), std.data) : ''));
+                              setM({ siteId, catMap, picked: [] });
                             }}
                           >
                             <option value="">가져오지 않음</option>
@@ -368,29 +381,96 @@ export default function Invoices() {
                         <td className="num align-top">{s.lines.length}</td>
                         <td className="num align-top">{won(s.total)}</td>
                         <td>
-                          {m.siteId &&
-                            s.categories.map((c) => (
-                              <div key={c.text} className="flex items-center gap-2 py-0.5">
-                                <span className="w-40 truncate" title={c.text}>
-                                  {c.text}
-                                </span>
-                                <span className="w-24 text-right text-[11.5px] tabular-nums text-muted">{won(c.amount)}</span>
-                                <span className="text-muted">→</span>
-                                <select
-                                  className={`input h-7 w-52 ${m.catMap[c.text] ? '' : 'border-amber-brand bg-amber-soft'}`}
-                                  value={m.catMap[c.text] ?? ''}
-                                  onChange={(e) => setM({ catMap: { ...m.catMap, [c.text]: e.target.value } })}
-                                >
-                                  <option value="">미분류 (원장 제외)</option>
-                                  {c.text !== NO_CAT && <option value={NEW_CAT}>+ 새 현장분류 "{c.text}"</option>}
-                                  {siteCats.map((sc) => (
-                                    <option key={sc.id} value={sc.id}>
-                                      {sc.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            ))}
+                          {m.siteId && (
+                            <>
+                              {(m.picked?.length ?? 0) > 0 && (
+                                <div className="mb-1 flex items-center gap-2 rounded-md bg-amber-soft px-2 py-1 text-[12px]">
+                                  <span>체크한 원문 {m.picked!.length}개를 같은 분류로 →</span>
+                                  <select
+                                    className="input h-7 w-52"
+                                    value=""
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      if (!v) return;
+                                      const next = { ...m.catMap };
+                                      m.picked!.forEach((t) => (next[t] = v === NEW_CAT ? NEW_CAT : v));
+                                      if (v === NEW_CAT) {
+                                        // 새 분류는 첫 원문 이름으로 하나만 만들고 나머지는 그 분류로 묶는다
+                                        const first = m.picked![0];
+                                        m.picked!.forEach((t) => (next[t] = t === first ? NEW_CAT : `${NEW_CAT}:${first}`));
+                                      }
+                                      setM({ catMap: next, picked: [] });
+                                    }}
+                                  >
+                                    <option value="">현장분류 선택</option>
+                                    <option value={NEW_CAT}>+ 새 현장분류 "{m.picked![0]}"</option>
+                                    {siteCats.map((sc) => (
+                                      <option key={sc.id} value={sc.id}>
+                                        {sc.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button className="text-muted hover:text-ink" onClick={() => setM({ picked: [] })}>
+                                    취소
+                                  </button>
+                                </div>
+                              )}
+                              {s.categories.map((c) => {
+                                const cur = m.catMap[c.text] ?? '';
+                                const sug = !cur && c.text !== NO_CAT ? suggestCats(c.text, siteCats, std.data) : [];
+                                const picked = m.picked?.includes(c.text) ?? false;
+                                return (
+                                  <div key={c.text} className="py-0.5">
+                                    <div className="flex items-center gap-2">
+                                      {c.text !== NO_CAT ? (
+                                        <input
+                                          type="checkbox"
+                                          title="여러 원문을 체크해서 한꺼번에 같은 분류로 지정"
+                                          checked={picked}
+                                          onChange={() => setM({ picked: picked ? m.picked!.filter((t) => t !== c.text) : [...(m.picked ?? []), c.text] })}
+                                        />
+                                      ) : (
+                                        <span className="w-[13px]" />
+                                      )}
+                                      <span className="w-40 truncate" title={c.text}>
+                                        {c.text}
+                                      </span>
+                                      <span className="w-24 text-right text-[11.5px] tabular-nums text-muted">{won(c.amount)}</span>
+                                      <span className="text-muted">→</span>
+                                      <select
+                                        className={`input h-7 w-52 ${cur ? '' : 'border-amber-brand bg-amber-soft'}`}
+                                        value={cur.startsWith(`${NEW_CAT}:`) ? NEW_CAT : cur}
+                                        onChange={(e) => setM({ catMap: { ...m.catMap, [c.text]: e.target.value } })}
+                                      >
+                                        <option value="">미분류 (원장 제외)</option>
+                                        {c.text !== NO_CAT && <option value={NEW_CAT}>+ 새 현장분류 "{cur.startsWith(`${NEW_CAT}:`) ? cur.slice(NEW_CAT.length + 1) : c.text}"</option>}
+                                        {siteCats.map((sc) => (
+                                          <option key={sc.id} value={sc.id}>
+                                            {sc.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    {sug.length > 0 && (
+                                      <div className="ml-[21px] mt-0.5 flex flex-wrap items-center gap-1 text-[11px]">
+                                        <span className="text-muted">비슷한 분류:</span>
+                                        {sug.map((x) => (
+                                          <button
+                                            key={x.cat.id}
+                                            className="chip border border-amber-brand/60 bg-white hover:bg-amber-soft"
+                                            title={`비슷한 정도 ${Math.round(x.score * 100)}%`}
+                                            onClick={() => setM({ catMap: { ...m.catMap, [c.text]: x.cat.id } })}
+                                          >
+                                            {x.cat.name}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
                         </td>
                       </tr>
                     );

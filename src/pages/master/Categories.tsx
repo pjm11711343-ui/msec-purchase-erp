@@ -5,6 +5,7 @@ import { useSiteCategories, useSites, useStandardCategories } from '../../lib/ho
 import { categoryKey, won } from '../../lib/normalize';
 import { Empty, errMsg, PageHeader, useSelection, useToast } from '../../components/ui';
 import type { SiteCategory, StandardCategory, Trade } from '../../types';
+import CatDictionary from './CatDictionary';
 
 /** 분류 원래 이름에서 공종 꼬리표를 뗀 표시용 이름 */
 function displayName(name: string): string {
@@ -23,6 +24,7 @@ export default function Categories() {
   const [newName, setNewName] = useState('');
   const [newTrade, setNewTrade] = useState<Trade>('기계');
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'map' | 'dict'>('map');
 
   const siteOf = (id: string) => sites.data.find((s) => s.id === id);
   const shown = useMemo(
@@ -101,6 +103,13 @@ export default function Categories() {
       const moved = cats.data.filter((c) => c.standardCategoryId === from.id);
       await commitBatch([
         ...moved.map((c) => ({ type: 'set' as const, col: C.siteCategories, id: c.id, data: { standardCategoryId: toId } })),
+        // 원문 사전도 함께 옮긴다 (합쳐지는 표준분류 이름도 원문으로 남김)
+        (() => {
+          const to = std.data.find((x) => x.id === toId);
+          const all = [...(to?.aliases ?? []), from.name, ...(from.aliases ?? [])];
+          const uniq = [...new Map(all.map((a) => [a.replace(/\s+/g, ''), a])).values()];
+          return { type: 'set' as const, col: C.standardCategories, id: toId, data: { aliases: uniq } };
+        })(),
         { type: 'delete', col: C.standardCategories, id: from.id },
       ]);
       await audit('표준분류 합치기', `${from.name} → ${toId}`);
@@ -112,11 +121,28 @@ export default function Categories() {
         title="분류"
         desc="현장 투입집계 분류는 원래 이름 그대로 두고, 회사 전체 비교용 표준분류에 연결합니다."
         actions={
-          <button className="btn-primary" disabled={busy || !cats.data.length} onClick={buildDraft}>
-            표준분류 초안 만들기
-          </button>
+          tab === 'map' && (
+            <button className="btn-primary" disabled={busy || !cats.data.length} onClick={buildDraft}>
+              표준분류 초안 만들기
+            </button>
+          )
         }
       />
+      <div className="mb-4 inline-flex rounded-lg border border-line bg-white p-0.5">
+        {(
+          [
+            ['map', '표준분류 · 현장분류'],
+            ['dict', '분류 원문 사전'],
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} className={`rounded-md px-3 py-1 text-[12.5px] ${tab === k ? 'bg-navy-950 text-white' : 'text-muted hover:text-ink'}`} onClick={() => setTab(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'dict' ? (
+        <CatDictionary />
+      ) : (
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         <div className="card overflow-hidden">
           <div className="border-b border-line px-4 py-2.5 font-semibold">표준분류 {std.data.length}개</div>
@@ -164,6 +190,7 @@ export default function Categories() {
                       </td>
                       <td>
                         <input className="input h-7 w-full" defaultValue={s.name} onBlur={(e) => e.target.value.trim() !== s.name && saveStd(s, { name: e.target.value.trim() })} />
+                        {(s.aliases?.length ?? 0) > 0 && <div className="mt-0.5 truncate text-[10.5px] text-muted" title={s.aliases!.join(', ')}>원문: {s.aliases!.join(', ')}</div>}
                       </td>
                       <td>
                         <select className="input h-7" value={s.trade} onChange={(e) => saveStd(s, { trade: e.target.value as Trade })}>
@@ -284,6 +311,7 @@ export default function Categories() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
