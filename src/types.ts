@@ -37,6 +37,7 @@ export interface Site {
   managerContact?: string; // 소장 연락처 (예: 박광옥소장 : 010-...)
   officeContact?: string; // 공무 연락처
   orderDisplayName?: string; // 발주서 '현장' 칸 표기
+  allowReqExcel?: boolean; // 현장 사용자(소장·담당)에게 '청구서 엑셀 불러오기' 허용
   active: boolean;
   createdAt?: number;
 }

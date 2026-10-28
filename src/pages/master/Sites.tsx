@@ -18,6 +18,16 @@ const FIELDS = [
   { key: 'address', label: '현장 주소' },
   { key: 'households', label: '규모·세대수' },
   { key: 'orderDisplayName', label: '발주서 현장 표기', hint: '발주서 "현장" 칸에 찍히는 이름' },
+  {
+    key: 'allowReqExcel',
+    label: '청구서 엑셀 첨부 (현장 사용자)',
+    type: 'select' as const,
+    options: [
+      { value: 'false', label: '사용 안 함' },
+      { value: 'true', label: '사용' },
+    ],
+    hint: '현장소장·현장담당이 청구서 작성 때 엑셀 파일을 불러올 수 있는지. 자재부·관리자는 항상 사용',
+  },
   { key: 'aliases', label: '다른 표기 (쉼표로 구분)', type: 'list' as const, hint: '계산서 시트 이름 등. 계산서를 올리면 자동으로 늘어납니다.' },
 ];
 
@@ -47,6 +57,7 @@ export default function Sites() {
     households: String(d.households ?? '').trim() || undefined,
     orderDisplayName: String(d.orderDisplayName ?? '').trim() || undefined,
     aliases: toList(d.aliases),
+    allowReqExcel: d.allowReqExcel === true || d.allowReqExcel === 'true',
     active: prev?.active ?? true,
   });
 
@@ -67,6 +78,7 @@ export default function Sites() {
           { key: 'address', label: '주소' },
           { key: 'cats', label: '분류', className: 'num', render: (s) => cats.data.filter((c) => c.siteId === s.id).length },
           { key: 'aliases', label: '다른 표기', render: (s) => <span className="text-[11.5px] text-muted">{(s.aliases ?? []).join(', ')}</span> },
+          { key: 'allowReqExcel', label: '청구 엑셀', render: (s) => (s.allowReqExcel ? <span className="chip bg-emerald-50 text-emerald-700">사용</span> : <span className="text-[11.5px] text-muted">안 함</span>) },
           { key: 'active', label: '상태', render: (s) => (s.active ? '사용' : '중지') },
         ]}
         fields={FIELDS}
@@ -80,6 +92,24 @@ export default function Sites() {
           await audit(id ? '현장 수정' : '현장 추가', sid, { name: data.name });
         }}
         onActive={async (ids, active) => commitBatch(ids.map((id) => ({ type: 'set' as const, col: C.sites, id, data: { active } })))}
+        extraActions={(sel, clear) =>
+          sel.length > 0 && (
+            <>
+              <button
+                className="btn-ghost h-7 text-[12px]"
+                onClick={() => commitBatch(sel.map((id) => ({ type: 'set' as const, col: C.sites, id, data: { allowReqExcel: true } }))).then(clear)}
+              >
+                청구 엑셀 사용
+              </button>
+              <button
+                className="btn-ghost h-7 text-[12px]"
+                onClick={() => commitBatch(sel.map((id) => ({ type: 'set' as const, col: C.sites, id, data: { allowReqExcel: false } }))).then(clear)}
+              >
+                청구 엑셀 안 함
+              </button>
+            </>
+          )
+        }
         onDelete={async (ids) => {
           const ops: Parameters<typeof commitBatch>[0] = [];
           for (const id of ids) {
