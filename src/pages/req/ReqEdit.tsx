@@ -22,6 +22,9 @@ const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 
 type Draft = Omit<Requisition, 'id'> & { id?: string };
 
+
+/** 단위 드롭다운 기본 목록 */
+const COMMON_UNITS = ['EA', 'M', 'SET', '본', '개', 'KG', 'BOX', '롤', '식', '대', '조', 'L', 'TON', 'M2', '매', '통'];
 export default function ReqEdit() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -100,6 +103,38 @@ export default function ReqEdit() {
     reqs.data.forEach((r) => r.lines.forEach((l) => l.itemName && s.add(l.itemName)));
     return [...s].sort().slice(0, 3000);
   }, [prices.rows, reqs.data]);
+  // 품명별 규격 / 품명·규격별 단위 목록 (단가표 + 지난 청구서)
+  const specUnit = useMemo(() => {
+    const specs = new Map<string, Set<string>>();
+    const units = new Map<string, Set<string>>();
+    const unitsItem = new Map<string, Set<string>>();
+    const add = (m: Map<string, Set<string>>, k: string, v: string) => {
+      if (!v) return;
+      const set = m.get(k) ?? new Set<string>();
+      set.add(v);
+      m.set(k, set);
+    };
+    const put = (item: string, spec: string, unit: string) => {
+      const ik = nameKey(item);
+      if (!ik) return;
+      add(specs, ik, (spec ?? '').trim());
+      add(units, `${ik}|${nameKey(spec)}`, (unit ?? '').trim());
+      add(unitsItem, ik, (unit ?? '').trim());
+    };
+    prices.rows.forEach((p) => put(p.itemName, p.spec, p.unit));
+    reqs.data.forEach((r) => r.lines.forEach((l) => put(l.itemName, l.spec, l.unit)));
+    return { specs, units, unitsItem };
+  }, [prices.rows, reqs.data]);
+  const sizeOf = (s: string) => {
+    const m = s.match(/(\d+(?:\.\d+)?)/);
+    return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+  };
+  const specOptions = (item: string) => [...(specUnit.specs.get(nameKey(item)) ?? [])].sort((a, b) => sizeOf(a) - sizeOf(b) || a.localeCompare(b, 'ko'));
+  const unitOptions = (item: string, spec: string) => {
+    const exact = [...(specUnit.units.get(`${nameKey(item)}|${nameKey(spec)}`) ?? [])];
+    const byItem = [...(specUnit.unitsItem.get(nameKey(item)) ?? [])];
+    return [...new Set([...exact, ...byItem, ...COMMON_UNITS])];
+  };
 
   if (!d) return <div className="text-muted">{reqs.loading || sites.loading ? '불러오는 중…' : '청구서를 찾을 수 없습니다.'}</div>;
 
@@ -465,8 +500,34 @@ export default function ReqEdit() {
                     <tr key={l.key}>
                       <td className="text-muted">{i + 1}</td>
                       <td>{T(l.key, 'itemName', l.itemName, editable, 'w-44', { list: 'item-names', onBlur: () => autoPrice(l.key) })}</td>
-                      <td>{T(l.key, 'spec', l.spec, editable, 'w-24', { onBlur: () => autoPrice(l.key) })}</td>
-                      <td>{T(l.key, 'unit', l.unit, editable, 'w-12')}</td>
+                      <td>
+                        {T(l.key, 'spec', l.spec, editable, 'w-24', {
+                          list: `spec-${l.key}`,
+                          placeholder: specOptions(l.itemName).length ? '선택 ▾' : '',
+                          onBlur: () => {
+                            autoPrice(l.key);
+                            const u = unitOptions(l.itemName, l.spec);
+                            if (!l.unit && specUnit.units.get(`${nameKey(l.itemName)}|${nameKey(l.spec)}`)?.size === 1) setLine(l.key, { unit: u[0] });
+                          },
+                        })}
+                        {editable && (
+                          <datalist id={`spec-${l.key}`}>
+                            {specOptions(l.itemName).map((x) => (
+                              <option key={x} value={x} />
+                            ))}
+                          </datalist>
+                        )}
+                      </td>
+                      <td>
+                        {T(l.key, 'unit', l.unit, editable, 'w-16', { list: `unit-${l.key}` })}
+                        {editable && (
+                          <datalist id={`unit-${l.key}`}>
+                            {unitOptions(l.itemName, l.spec).map((x) => (
+                              <option key={x} value={x} />
+                            ))}
+                          </datalist>
+                        )}
+                      </td>
                       <td className="num">{N(l.key, 'contractQty', l.contractQty, editable, 'w-16')}</td>
                       <td className="num">{N(l.key, 'contractPrice', l.contractPrice, editable)}</td>
                       <td className="num">{N(l.key, 'execQty', l.execQty, editable, 'w-16')}</td>
