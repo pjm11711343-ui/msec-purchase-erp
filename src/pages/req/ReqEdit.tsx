@@ -5,7 +5,7 @@ import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { useLedger, useSiteCategories, useSites, useVendors } from '../../lib/hooks';
 import { fillReqForm, type ReqFormCat } from '../../lib/reqForm';
-import { nameKey, num, won } from '../../lib/normalize';
+import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
 import { lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
@@ -293,14 +293,46 @@ export default function ReqEdit() {
     setD((x) => x && { ...x, lines: [...x.lines.filter((l) => l.itemName.trim()), ...added] });
   };
 
+  /** 청구서에 적힌 현장 표기 → ERP 현장 (이름·정식명·다른 표기·묶음명 + 기계/소방 구분) */
+  const findSiteByLabel = (labels: string[]) => {
+    const trade = labels.some((x) => /소방/.test(x)) ? '소방' : labels.some((x) => /기계/.test(x)) ? '기계' : undefined;
+    for (const label of labels) {
+      const k = nameKey(label);
+      if (!k) continue;
+      const exact = sites.data.filter((s) => [s.name, s.fullName, ...(s.aliases ?? [])].some((x) => x && nameKey(x) === k));
+      const hit = exact.length
+        ? exact
+        : sites.data.filter((s) => [s.name, s.fullName, s.groupName ?? '', ...(s.aliases ?? [])].some((x) => x && looselyEqual(x, label)));
+      if (hit.length === 1) return { site: hit[0] };
+      if (hit.length > 1) {
+        const t = trade && hit.filter((s) => s.trade === trade);
+        if (t && t.length === 1) return { site: t[0] };
+        return { many: hit }; // 기계/소방처럼 여러 현장이 맞으면 직접 고르게 한다
+      }
+    }
+    return {};
+  };
+
   const onExcel = async (file?: File) => {
     if (!file) return;
     try {
       const p = parseReqSheet(readWorkbook(await file.arrayBuffer()));
       if (!p.lines.length) return toast('청구서 시트에 품목이 없습니다.', 'err');
+      // 청구서의 현장명(B4 "현장명 : ○○ 현장", 오른쪽 위 U2)으로 현장 자동 선택
+      const { site, many } = findSiteByLabel([p.siteLabel, p.siteLabel2].filter(Boolean) as string[]);
+      let siteMsg = '';
+      if (site && site.id !== d.siteId) {
+        if (d.id) siteMsg = ` 청구서 현장(${site.name})이 지금 현장과 다릅니다. 저장된 청구서는 현장을 바꿀 수 없으니 확인하세요.`;
+        else {
+          const def = defaultSteps(site.id);
+          setD((x) => x && { ...x, siteId: site.id, siteName: site.name, approvalType: def.type, steps: def.steps });
+          siteMsg = ` 현장을 "${site.name}"(으)로 골랐습니다.`;
+        }
+      } else if (many) siteMsg = ` "${p.siteLabel}"에 맞는 현장이 여러 개입니다(${many.map((s) => s.name).join(', ')}). 현장을 직접 고르세요.`;
+      else if (!site && p.siteLabel) siteMsg = ` 청구서 현장명 "${p.siteLabel}"과 맞는 현장을 찾지 못했습니다. 현장을 직접 고르세요.`;
       addFromRows(p.lines);
       setD((x) => x && { ...x, purpose: x.purpose || p.purpose, requestDate: x.requestDate || p.docDate || today() });
-      toast(`${p.lines.length}줄을 가져왔습니다. 단가가 빈 줄은 단가표·직전 발주에서 채웠습니다.`);
+      toast(`${p.lines.length}줄을 가져왔습니다.${siteMsg}`, !site && p.siteLabel ? 'err' : undefined);
     } catch (e) {
       toast(errMsg(e), 'err');
     }

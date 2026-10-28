@@ -7,6 +7,7 @@ import { nameKey, num, toDateStr } from './normalize';
 
 export interface ParsedReqSheet {
   siteLabel: string;
+  siteLabel2?: string; // 오른쪽 위(U2) 현장 표기
   docDate?: string;
   purpose?: string;
   lines: Omit<ReqLine, 'key'>[];
@@ -24,7 +25,8 @@ export function parseReqSheet(wb: XLSX.WorkBook): ParsedReqSheet {
     const t = String(v).trim();
     return t === '"' || t === '0' ? '' : t;
   };
-  const siteLabel = s(rows[3] ?? [], 1).replace(/^현장명\s*[:：]\s*/, '');
+  const siteLabel = s(rows[3] ?? [], 1).replace(/^현장명\s*[:：]\s*/, '').replace(/(\s*현장)+\s*$/, '').trim();
+  const siteLabel2 = s(rows[1] ?? [], 20) || undefined;
   const d = (rows[3] ?? [])[14];
   const docDate = toDateStr(d);
   let purpose = '';
@@ -59,7 +61,7 @@ export function parseReqSheet(wb: XLSX.WorkBook): ParsedReqSheet {
       remark: s(r, 19) || undefined,
     });
   });
-  return { siteLabel, docDate, purpose: purpose || undefined, lines };
+  return { siteLabel, siteLabel2, docDate, purpose: purpose || undefined, lines };
 }
 
 /** 원 양식 열 배치로 내려받기 */
