@@ -87,7 +87,10 @@ body {
   @apply px-1 py-1;
 }
 .req-tbl th {
-  @apply whitespace-normal text-[11.5px];
+  @apply static whitespace-normal border-r border-line text-[11.5px];
+}
+.req-tbl td {
+  @apply border-r border-line;
 }
 .req-tbl .input {
   @apply min-w-0 text-[12px];

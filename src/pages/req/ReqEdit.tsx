@@ -3,12 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
 import { C } from '../../lib/firebase';
-import { useSiteCategories, useSites, useVendors } from '../../lib/hooks';
+import { useLedger, useSiteCategories, useSites, useVendors } from '../../lib/hooks';
+import { fillReqForm, type ReqFormCat } from '../../lib/reqForm';
 import { nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
 import { lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
-import { exportReq, parseReqSheet } from '../../lib/reqExcel';
+import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
@@ -36,6 +37,7 @@ export default function ReqEdit() {
   const sites = useSites();
   const vendors = useVendors();
   const cats = useSiteCategories();
+  const ledger = useLedger();
   const reqs = useRequisitions();
   const lines = useApprovalLines();
   const users = useUsers();
@@ -313,6 +315,43 @@ export default function ReqEdit() {
 
   const vendorOf = (vid?: string): Vendor | undefined => vendors.data.find((v) => v.id === vid);
   const catName = (cid?: string) => cats.data.find((c) => c.id === cid)?.name;
+
+  /** 회사 청구서 양식(엑셀)으로 내려받기 */
+  const downloadForm = async () => {
+    try {
+      setBusy(true);
+      const [{ default: ExcelJS }, tpl, logo] = await Promise.all([
+        import('exceljs'),
+        fetch('/templates/req-form.xlsx').then((r) => r.arrayBuffer()),
+        fetch('/templates/logo.png').then((r) => r.arrayBuffer()),
+      ]);
+      const req = { ...(build({}) as Requisition), id: d.id ?? '' };
+      // 분류 요약: 이 청구서 금액이 큰 분류 4개
+      const byCat = new Map<string, number>();
+      req.lines.forEach((l) => l.siteCategoryId && byCat.set(l.siteCategoryId, (byCat.get(l.siteCategoryId) ?? 0) + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty })));
+      const list: ReqFormCat[] = [...byCat]
+        .sort((a, b) => b[1] - a[1])
+        .map(([cid, current]) => {
+          const c = cats.data.find((x) => x.id === cid);
+          const used = ledger.data.filter((e) => e.siteCategoryId === cid).reduce((a, e) => a + e.amount, 0);
+          return { name: c?.name ?? '', contract: c?.contractAmount ?? 0, change: c?.changeAmount ?? 0, exec: c?.execAmount ?? 0, prior: (c?.migratedInput ?? 0) + used, current };
+        });
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(tpl);
+      const { truncated } = fillReqForm(wb, req, list, logo);
+      const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `구매청구서_${req.siteName}_${req.docNo || req.requestDate}.xlsx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      if (truncated) toast(`양식은 168줄까지라 ${truncated}줄은 빠졌습니다.`, 'err');
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
   const N = (key: string, field: keyof ReqLine, v: number, on: boolean | undefined, w = 'w-20') =>
     on ? (
       <input className={`input h-7 ${w} px-1.5 text-right`} value={v || ''} onChange={(e) => setLine(key, { [field]: num(e.target.value) } as Partial<ReqLine>)} />
@@ -333,7 +372,7 @@ export default function ReqEdit() {
               목록
             </Link>
             {d.id && (
-              <button className="btn-ghost" onClick={() => exportReq({ ...(build({}) as Requisition), id: d.id! }, catName)}>
+              <button className="btn-ghost" disabled={busy} onClick={downloadForm}>
                 엑셀 다운로드
               </button>
             )}
@@ -483,6 +522,15 @@ export default function ReqEdit() {
       </div>
 
       <div className="card overflow-hidden">
+        <div className="relative border-b border-line px-4 pb-2 pt-3">
+          <div className="text-center text-[20px] font-bold tracking-[0.6em] text-navy-950 underline decoration-1 underline-offset-[6px]">구매청구서</div>
+          <div className="mt-2 flex flex-wrap items-end justify-between gap-2 text-[12.5px]">
+            <span className="font-semibold">현장명 : {d.siteName || '-'} 현장</span>
+            <span className="text-muted">
+              결의번호 : 제 <b className="text-ink">{d.requestDate}</b> - <b className="text-ink">{d.docNo || '　'}</b> 호
+            </span>
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
           <span className="font-semibold">품목 {d.lines.filter((l) => l.itemName).length}줄</span>
           {prices.error && <span className="text-[12px] text-red-600">단가표를 읽지 못했습니다</span>}
@@ -511,65 +559,60 @@ export default function ReqEdit() {
           <div>
             <table className="tbl req-tbl w-full table-fixed text-[12px]">
               <colgroup>
-                <col style={{ width: 26 }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '4.5%' }} />
-                <col style={{ width: '6%' }} />
-                <col style={{ width: '5.5%' }} />
-                <col style={{ width: '5.5%' }} />
-                <col style={{ width: '4.5%' }} />
-                <col style={{ width: '9.5%' }} />
+                <col style={{ width: 24 }} />
+                <col style={{ width: '13%' }} />
                 <col style={{ width: '8%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '8.5%' }} />
+                <col style={{ width: '4%' }} />
+                <col style={{ width: '4.5%' }} />
                 <col style={{ width: '5%' }} />
-                <col style={{ width: '7.5%' }} />
+                <col style={{ width: '4.5%' }} />
+                <col style={{ width: '4.5%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '4.5%' }} />
                 <col style={{ width: '6.5%' }} />
-                <col style={{ width: 40 }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '7.5%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '4%' }} />
+                <col style={{ width: 36 }} />
               </colgroup>
-              <thead>
+              <thead className="text-center">
                 <tr>
-                  <th>#</th>
-                  <th>품명</th>
-                  <th>규격</th>
-                  <th>단위</th>
-                  <th className="num leading-tight">
-                    계약수량
-                    <br />
-                    계약단가
-                  </th>
-                  <th className="num leading-tight">
-                    실행량
-                    <br />
-                    기반입
-                  </th>
-                  <th className="num">금회청구</th>
-                  <th className="num leading-tight">
-                    실행
-                    <br />
-                    잔여
-                  </th>
-                  <th className="leading-tight">
+                  <th rowSpan={2}>#</th>
+                  <th rowSpan={2} className="text-center">품 명</th>
+                  <th rowSpan={2} className="text-center">규 격</th>
+                  <th rowSpan={2} className="text-center">단위</th>
+                  <th colSpan={2} className="text-center">계약내역량</th>
+                  <th rowSpan={2} className="bg-red-50 text-center">실행량</th>
+                  <th colSpan={2} className="bg-red-50 text-center">청구 및 반입 수량</th>
+                  <th rowSpan={2} className="text-center">본/(비고)</th>
+                  <th colSpan={3} className="bg-amber-soft text-center">발주 결의 (본사 작성분)</th>
+                  <th rowSpan={2} className="bg-amber-soft text-center">거래선</th>
+                  <th rowSpan={2} className="text-center">비 고</th>
+                  <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">
                     희망납기
                     <br />
                     사용 위치·공정
                   </th>
-                  <th>자재분류</th>
-                  <th className="leading-tight">
-                    본/비고
+                  <th rowSpan={2} className="bg-[#eef1f6] text-center">자재분류</th>
+                  <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">
+                    실행
                     <br />
-                    비고
+                    잔여
                   </th>
-                  <th className="bg-amber-soft">거래선</th>
-                  <th className="num bg-amber-soft leading-tight">
-                    발주
-                    <br />
-                    수량
-                  </th>
-                  <th className="num bg-amber-soft">단가</th>
-                  <th className="num bg-amber-soft">금액</th>
-                  <th>발주</th>
+                  <th rowSpan={2}></th>
+                </tr>
+                <tr>
+                  <th className="text-center">수량</th>
+                  <th className="text-center">단가</th>
+                  <th className="bg-red-50 text-center">기반입</th>
+                  <th className="bg-red-50 text-center">금회청구</th>
+                  <th className="bg-amber-soft text-center">발주수량</th>
+                  <th className="bg-amber-soft text-center">단 가</th>
+                  <th className="bg-amber-soft text-center">금 액</th>
                 </tr>
               </thead>
               <tbody>
@@ -578,7 +621,7 @@ export default function ReqEdit() {
                   const remain = l.execQty ? l.execQty - pq - l.reqQty : null;
                   return (
                     <tr key={l.key} className="align-top">
-                      <td className="pt-2 text-muted">{i + 1}</td>
+<td className="pt-2 text-muted">{i + 1}</td>
                       <td>
                         {editable ? (
                           <PickInput
@@ -617,52 +660,27 @@ export default function ReqEdit() {
                           </datalist>
                         )}
                       </td>
-                      <td className="num">
-                        <div className="flex flex-col gap-0.5">
-                          {N(l.key, 'contractQty', l.contractQty, editable, 'w-full')}
-                          {N(l.key, 'contractPrice', l.contractPrice, editable, 'w-full')}
-                        </div>
+                                            <td className="num">{N(l.key, 'contractQty', l.contractQty, editable, 'w-full')}</td>
+                      <td className="num">{N(l.key, 'contractPrice', l.contractPrice, editable, 'w-full')}</td>
+                      <td className="num">{N(l.key, 'execQty', l.execQty, editable, 'w-full')}</td>
+                      <td className="num pt-2 text-muted" title={l.priorQtyManual != null ? '엑셀에서 받은 값' : '이전 승인 청구 합계'}>
+                        {pq ? pq.toLocaleString() : ''}
                       </td>
-                      <td className="num">
-                        <div className="flex flex-col gap-0.5">
-                          {N(l.key, 'execQty', l.execQty, editable, 'w-full')}
-                          <span className="pr-1.5 text-muted" title={l.priorQtyManual != null ? '기반입: 엑셀에서 받은 값' : '기반입: 이전 승인 청구 합계'}>
-                            {pq ? pq.toLocaleString() : '-'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, editable, 'w-full')}</td>
-                      <td className={`num pt-2 ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}>{remain == null ? '' : remain.toLocaleString()}</td>
-                      <td>
-                        <div className="flex flex-col gap-0.5">
-                          {editable ? (
-                            <input type="date" className="input h-7 w-full px-1 text-[11.5px]" value={l.dueDate ?? ''} onChange={(e) => setLine(l.key, { dueDate: e.target.value || undefined })} />
-                          ) : (
-                            <span>{l.dueDate}</span>
+<td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, editable, 'w-full')}</td>
+                                            <td>{T(l.key, 'note', l.note, editable, 'w-full')}</td>
+<td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, orderEditable, 'w-full')}</td>
+                      <td className="num bg-amber-soft/40">
+                        <div className="flex items-center justify-end gap-0.5">
+                          {N(l.key, 'orderPrice', l.orderPrice, orderEditable, 'w-full min-w-0')}
+                          {orderEditable && l.itemName && (
+                            <button className="shrink-0 text-[11px] text-amber-700 hover:underline" onClick={() => setPriceFor(l.key)} title="단가 후보 보기">
+                              ▾
+                            </button>
                           )}
-                          {T(l.key, 'location', l.location, editable, 'w-full', { placeholder: '사용 위치·공정' })}
                         </div>
+                        {l.priceSource && <div className="text-right text-[10px] text-muted">{l.priceSource}</div>}
                       </td>
-                      <td>
-                        {editable ? (
-                          <select className="input h-7 w-full px-1" value={l.siteCategoryId ?? ''} onChange={(e) => setLine(l.key, { siteCategoryId: e.target.value || undefined })}>
-                            <option value="">-</option>
-                            {siteCats.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          catName(l.siteCategoryId)
-                        )}
-                      </td>
-                      <td>
-                        <div className="flex flex-col gap-0.5">
-                          {T(l.key, 'note', l.note, editable, 'w-full', { placeholder: '본/비고' })}
-                          {T(l.key, 'remark', l.remark, editable, 'w-full', { placeholder: '비고' })}
-                        </div>
-                      </td>
+                      <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
                       <td className="bg-amber-soft/40">
                         {orderEditable ? (
                           <select
@@ -686,19 +704,32 @@ export default function ReqEdit() {
                           <span className="break-words">{l.vendorName}</span>
                         )}
                       </td>
-                      <td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, orderEditable, 'w-full')}</td>
-                      <td className="num bg-amber-soft/40">
-                        <div className="flex items-center justify-end gap-0.5">
-                          {N(l.key, 'orderPrice', l.orderPrice, orderEditable, 'w-full min-w-0')}
-                          {orderEditable && l.itemName && (
-                            <button className="shrink-0 text-[11px] text-amber-700 hover:underline" onClick={() => setPriceFor(l.key)} title="단가 후보 보기">
-                              ▾
-                            </button>
+                                            <td>{T(l.key, 'remark', l.remark, editable, 'w-full')}</td>
+<td>
+                        <div className="flex flex-col gap-0.5">
+                          {editable ? (
+                            <input type="date" className="input h-7 w-full px-1 text-[11.5px]" value={l.dueDate ?? ''} onChange={(e) => setLine(l.key, { dueDate: e.target.value || undefined })} />
+                          ) : (
+                            <span>{l.dueDate}</span>
                           )}
+                          {T(l.key, 'location', l.location, editable, 'w-full', { placeholder: '사용 위치·공정' })}
                         </div>
-                        {l.priceSource && <div className="text-right text-[10px] text-muted">{l.priceSource}</div>}
                       </td>
-                      <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
+                      <td>
+                        {editable ? (
+                          <select className="input h-7 w-full px-1" value={l.siteCategoryId ?? ''} onChange={(e) => setLine(l.key, { siteCategoryId: e.target.value || undefined })}>
+                            <option value="">-</option>
+                            {siteCats.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          catName(l.siteCategoryId)
+                        )}
+                      </td>
+                      <td className={`num pt-2 ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}>{remain == null ? '' : remain.toLocaleString()}</td>
                       <td className="pt-1.5">
                         {d.id && ordered.get(`${d.id}|${l.key}`) && (
                           <Link to={`/po/${ordered.get(`${d.id}|${l.key}`)!.id}`} className="block truncate text-[10.5px] text-emerald-700 hover:underline" title={ordered.get(`${d.id}|${l.key}`)!.poNo}>
@@ -715,14 +746,53 @@ export default function ReqEdit() {
                   );
                 })}
                 <tr className="bg-[#f7f8fb] font-semibold">
-                  <td colSpan={14} className="text-right">
+                  <td colSpan={12} className="text-right">
                     합계
                   </td>
                   <td className="num">{won(d.lines.reduce((a, l) => a + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }), 0))}</td>
-                  <td></td>
+                  <td colSpan={6}></td>
                 </tr>
               </tbody>
             </table>
+            {/* 종이 양식과 같은 결재란 */}
+            <div className="flex flex-wrap items-end justify-between gap-4 border-t border-line px-4 py-3">
+              <div className="text-[12.5px]">
+                <div>위와 같이 구매 의뢰 합니다.</div>
+                <div className="mt-1 text-muted">
+                  {d.requestDate} · 합계 <b className="text-ink">{won(d.lines.reduce((a, l) => a + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }), 0))}</b>원
+                </div>
+              </div>
+              <div className="flex gap-3">
+                {(
+                  [
+                    ['현장', d.steps.map((s, i) => ({ s, i })).filter(({ s }) => /현장/.test(s.label))],
+                    ['본사', d.steps.map((s, i) => ({ s, i })).filter(({ s }) => !/현장/.test(s.label))],
+                  ] as const
+                ).map(([side, list]) =>
+                  list.length ? (
+                    <div key={side} className="flex border border-navy-900/30">
+                      <div className="flex w-6 items-center justify-center border-r border-navy-900/30 bg-[#f7f8fb] text-[11.5px] font-semibold [writing-mode:vertical-rl]">{side}</div>
+                      {list.map(({ s, i }) => (
+                        <div key={i} className="w-[76px] border-r border-navy-900/30 text-center last:border-r-0">
+                          <div className="border-b border-navy-900/30 bg-[#f7f8fb] py-0.5 text-[11px]">{s.label.replace(/^(현장|본사)\s*/, '') || s.label}</div>
+                          <div className="flex h-12 flex-col items-center justify-center text-[11.5px]">
+                            {s.result === 'skipped' || !s.userId ? (
+                              <span className="text-muted">/</span>
+                            ) : (
+                              <>
+                                <span className="font-medium">{s.userName}</span>
+                                {s.result === 'approved' && <span className="text-[10.5px] text-emerald-700">승인 {s.at ? new Date(s.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : ''}</span>}
+                                {s.result === 'rejected' && <span className="text-[10.5px] text-red-600">반려</span>}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

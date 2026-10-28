@@ -10,6 +10,7 @@
     "test:parsers": "tsx scripts/test-parsers.ts"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "firebase": "^13.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
