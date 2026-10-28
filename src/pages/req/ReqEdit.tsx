@@ -491,14 +491,16 @@ export default function ReqEdit() {
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, newLine()] })}>
                 + 줄 추가
               </button>
-              <button className="btn-ghost h-7 text-[12px]" onClick={() => setPasteOpen(true)}>
-                엑셀 붙여넣기
-              </button>
               {(isOffice || sites.data.find((s) => s.id === d.siteId)?.allowReqExcel) && (
-                <label className="btn-ghost h-7 cursor-pointer text-[12px]">
-                  청구서 엑셀 불러오기
-                  <input type="file" accept=".xlsx,.xls" hidden onChange={(e) => (onExcel(e.target.files?.[0]), (e.target.value = ''))} />
-                </label>
+                <>
+                  <button className="btn-ghost h-7 text-[12px]" onClick={() => setPasteOpen(true)}>
+                    엑셀 붙여넣기
+                  </button>
+                  <label className="btn-ghost h-7 cursor-pointer text-[12px]">
+                    청구서 엑셀 불러오기
+                    <input type="file" accept=".xlsx,.xls" hidden onChange={(e) => (onExcel(e.target.files?.[0]), (e.target.value = ''))} />
+                  </label>
+                </>
               )}
             </div>
           )}

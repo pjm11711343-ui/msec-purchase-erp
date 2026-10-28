@@ -20,13 +20,13 @@ const FIELDS = [
   { key: 'orderDisplayName', label: '발주서 현장 표기', hint: '발주서 "현장" 칸에 찍히는 이름' },
   {
     key: 'allowReqExcel',
-    label: '청구서 엑셀 첨부 (현장 사용자)',
+    label: '청구서 엑셀 (불러오기·붙여넣기)',
     type: 'select' as const,
     options: [
       { value: 'false', label: '사용 안 함' },
       { value: 'true', label: '사용' },
     ],
-    hint: '현장소장·현장담당이 청구서 작성 때 엑셀 파일을 불러올 수 있는지. 자재부·관리자는 항상 사용',
+    hint: '현장소장·현장담당이 청구서 작성 때 엑셀 불러오기·붙여넣기를 쓸 수 있는지. 자재부·관리자는 항상 사용',
   },
   { key: 'aliases', label: '다른 표기 (쉼표로 구분)', type: 'list' as const, hint: '계산서 시트 이름 등. 계산서를 올리면 자동으로 늘어납니다.' },
 ];
