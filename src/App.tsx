@@ -57,7 +57,7 @@ export default function App() {
         <Route path="receipt" element={<ReceiptStatus />} />
         <Route path="invoices" element={<Guard roles={OFFICE}><Invoices /></Guard>} />
         <Route path="invoices/:id" element={<Guard roles={OFFICE}><InvoiceMatch /></Guard>} />
-        <Route path="items" element={<Guard roles={OFFICE}><ItemLedger /></Guard>} />
+        <Route path="items" element={<Guard roles={[...OFFICE, 'executive']}><ItemLedger /></Guard>} />
         <Route path="import/requisition" element={<Guard roles={OFFICE}><ImportRequisition /></Guard>} />
         <Route path="master/sites" element={<Guard roles={OFFICE}><Sites /></Guard>} />
         <Route path="master/vendors" element={<Guard roles={OFFICE}><Vendors /></Guard>} />

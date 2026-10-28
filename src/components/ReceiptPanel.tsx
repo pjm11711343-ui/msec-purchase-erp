@@ -9,7 +9,7 @@ import type { PurchaseOrder, Receipt } from '../types';
 
 /** 발주서 한 장의 입고 입력 + 입고 기록 */
 export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; receipts: Receipt[] }) {
-  const { profile, vendor, can } = useAuth();
+  const { profile, vendor, can, readOnly } = useAuth();
   const toast = useToast();
   const mine = receipts.filter((r) => r.poId === po.id);
   const got = (k: string) => mine.filter((r) => r.lineKey === k).reduce((a, r) => a + r.qty, 0);
@@ -96,6 +96,7 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
 
   return (
     <div>
+      {!readOnly && (
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#fafbfc] px-4 py-2.5">
         <span className="text-[12px] text-muted">현장 입고일</span>
         <input className="input h-7 w-36" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -109,6 +110,7 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
           </button>
         </div>
       </div>
+      )}
       <table className="tbl">
         <thead>
           <tr>
@@ -129,7 +131,7 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
           {rows.map((r) => (
             <tr key={r.k} className={r.remain === 0 ? 'text-muted' : ''}>
               <td>
-                {r.remain > 0 && (
+                {r.remain > 0 && !readOnly && (
                   <input
                     type="checkbox"
                     checked={pick.has(r.k)}
@@ -151,7 +153,7 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
               <td className="num">{r.received ? r.received.toLocaleString() : ''}</td>
               <td className={`num font-semibold ${r.remain ? '' : 'text-emerald-600'}`}>{r.remain ? r.remain.toLocaleString() : '완료'}</td>
               <td className="num">
-                {r.remain > 0 && (
+                {r.remain > 0 && !readOnly && (
                   <input
                     className="input h-7 w-20 px-1.5 text-right"
                     value={qty[r.k] ?? String(r.remain)}
@@ -206,7 +208,7 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
                 </td>
                 <td>{r.confirmed ? <span className="chip bg-emerald-50 text-emerald-700">확인 {r.confirmedByName}</span> : <span className="chip bg-line text-muted">미확인</span>}</td>
                 <td className="text-right">
-                  {((!r.confirmed && (!isVendor || r.enteredBy === vendor?.id)) || can('admin')) && (
+                  {!readOnly && ((!r.confirmed && (!isVendor || r.enteredBy === vendor?.id)) || can('admin')) && (
                     <button className="text-[12px] text-muted hover:text-red-600" onClick={() => remove(r)}>
                       지우기
                     </button>

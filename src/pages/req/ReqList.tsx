@@ -23,7 +23,7 @@ export function isMyTurn(r: Requisition, uid?: string, isAdmin?: boolean) {
 }
 
 export default function ReqList() {
-  const { profile, can } = useAuth();
+  const { profile, can, readOnly } = useAuth();
   const reqs = useRequisitions();
   const sites = useSites();
   const [tab, setTab] = useState<'inbox' | 'mine' | 'all'>('all');
@@ -57,9 +57,11 @@ export default function ReqList() {
         title="구매청구"
         desc="현장에서 청구서를 작성해 결재에 올리고, 결재가 끝나면 3단계에서 업체별 발주로 넘어갑니다."
         actions={
-          <Link to="/req/new" className="btn-primary">
-            + 청구서 작성
-          </Link>
+          !readOnly && (
+            <Link to="/req/new" className="btn-primary">
+              + 청구서 작성
+            </Link>
+          )
         }
       />
       <div className="card overflow-hidden">

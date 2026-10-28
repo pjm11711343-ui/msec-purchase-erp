@@ -21,6 +21,9 @@ service cloud.firestore {
     function isOffice() { return isErp() && erpUser().role in ['admin', 'material']; }
     function isAdmin() { return isErp() && erpUser().role == 'admin'; }
     function hasSite(siteId) { return isOffice() || (isErp() && siteId in erpUser().siteIds); }
+    // 결재자(대표·사장): 모든 현장 열람 + 자기 차례 결재만
+    function isExec() { return isErp() && erpUser().role == 'executive'; }
+    function canRead(siteId) { return hasSite(siteId) || isExec(); }
     // 협력업체 포털 계정
     function vendorPath() { return /databases/$(database)/documents/erp_vendorAccounts/$(request.auth.uid); }
     function isVendor() { return erpSignedIn() && exists(vendorPath()) && get(vendorPath()).data.active == true; }
@@ -64,15 +67,15 @@ service cloud.firestore {
       allow write: if isOffice();
     }
     match /erp_siteCategories/{id} {
-      allow read: if hasSite(resource.data.siteId);
+      allow read: if canRead(resource.data.siteId);
       allow write: if isOffice();
     }
     match /erp_inputLedger/{id} {
-      allow read: if hasSite(resource.data.siteId);
+      allow read: if canRead(resource.data.siteId);
       allow write: if isOffice();
     }
     match /erp_invoices/{id} {
-      allow read: if isOffice() || (isVendor() && resource.data.vendorId == myVendor());
+      allow read: if isOffice() || isExec() || (isVendor() && resource.data.vendorId == myVendor());
       allow create: if isOffice()
         || (isVendor() && request.resource.data.vendorId == myVendor()
             && request.resource.data.source == 'portal' && request.resource.data.appliedToLedger == false);
@@ -89,20 +92,21 @@ service cloud.firestore {
       allow read: if isErp();
     }
     match /erp_requisitions/{id} {
-      allow read: if hasSite(resource.data.siteId);
+      allow read: if canRead(resource.data.siteId);
       allow create: if hasSite(request.resource.data.siteId) && request.resource.data.createdBy == request.auth.uid;
-      allow update: if hasSite(resource.data.siteId) && request.resource.data.siteId == resource.data.siteId;
+      allow update: if (hasSite(resource.data.siteId) || (isExec() && resource.data.currentApproverId == request.auth.uid))
+        && request.resource.data.siteId == resource.data.siteId;
       allow delete: if isOffice() || (resource.data.createdBy == request.auth.uid && resource.data.status in ['draft', 'rejected']);
     }
     match /erp_purchaseOrders/{id} {
-      allow read: if hasSite(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
+      allow read: if canRead(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
       allow create, delete: if isOffice();
       allow update: if isOffice()
         || (isVendor() && resource.data.vendorId == myVendor()
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ackAt', 'ackBy']));
     }
     match /erp_receipts/{id} {
-      allow read: if hasSite(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
+      allow read: if canRead(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
       allow create: if hasSite(request.resource.data.siteId)
         || (isVendor() && request.resource.data.vendorId == myVendor()
             && request.resource.data.enteredBy == request.auth.uid

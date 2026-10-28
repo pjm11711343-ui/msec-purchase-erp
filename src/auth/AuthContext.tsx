@@ -14,6 +14,8 @@ interface AuthState {
   logout: () => Promise<void>;
   /** 전체 현장 권한이면 null, 아니면 담당 현장 id 목록 */
   siteIds: string[] | null;
+  /** 결재자(대표·사장): 결재와 열람만 가능 */
+  readOnly: boolean;
   can: (...roles: Role[]) => boolean;
 }
 
@@ -90,7 +92,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithEmailAndPassword(auth, vendorEmail(code), accessCode);
     },
     logout: () => signOut(auth),
-    siteIds: profile && (profile.role === 'admin' || profile.role === 'material') ? null : (profile?.siteIds ?? []),
+    siteIds: profile && (profile.role === 'admin' || profile.role === 'material' || profile.role === 'executive') ? null : (profile?.siteIds ?? []),
+    readOnly: profile?.role === 'executive',
     can: (...roles) => Boolean(profile && profile.active && roles.includes(profile.role)),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

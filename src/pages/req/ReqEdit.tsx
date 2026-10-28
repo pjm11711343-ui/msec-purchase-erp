@@ -24,11 +24,13 @@ type Draft = Omit<Requisition, 'id'> & { id?: string };
 
 
 /** 단위 드롭다운 기본 목록 */
-const COMMON_UNITS = ['EA', 'M', 'SET', '본', '개', 'KG', 'BOX', '롤', '식', '대', '조', 'L', 'TON', 'M2', '매', '통'];
+/** 목록에서 빼는 단위 */
+const HIDDEN_UNITS = new Set(['본']);
+const COMMON_UNITS = ['EA', 'M', 'SET', '개', 'KG', 'BOX', '롤', '식', '대', '조', 'L', 'TON', 'M2', '매', '통'];
 export default function ReqEdit() {
   const { id } = useParams();
   const nav = useNavigate();
-  const { profile, can } = useAuth();
+  const { profile, can, readOnly } = useAuth();
   const toast = useToast();
   const sites = useSites();
   const vendors = useVendors();
@@ -133,12 +135,12 @@ export default function ReqEdit() {
   const unitOptions = (item: string, spec: string) => {
     const exact = [...(specUnit.units.get(`${nameKey(item)}|${nameKey(spec)}`) ?? [])];
     const byItem = [...(specUnit.unitsItem.get(nameKey(item)) ?? [])];
-    return [...new Set([...exact, ...byItem, ...COMMON_UNITS])];
+    return [...new Set([...exact, ...byItem, ...COMMON_UNITS])].filter((u) => !HIDDEN_UNITS.has(u));
   };
 
   if (!d) return <div className="text-muted">{reqs.loading || sites.loading ? '불러오는 중…' : '청구서를 찾을 수 없습니다.'}</div>;
 
-  const editable = (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
+  const editable = !readOnly && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
   const myTurn = !!d.id && isMyTurn(d as Requisition, profile?.id, can('admin'));
   const orderEditable = editable ? isOffice : myTurn && isOffice;
   const dupDoc =

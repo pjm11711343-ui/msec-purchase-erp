@@ -9,7 +9,7 @@ interface Item {
   soon?: string; // 아직 만들지 않은 단계
 }
 
-const ALL: Role[] = ['admin', 'material', 'siteManager', 'siteStaff'];
+const ALL: Role[] = ['admin', 'material', 'executive', 'siteManager', 'siteStaff'];
 const OFFICE: Role[] = ['admin', 'material'];
 
 const GROUPS: { title: string; items: Item[] }[] = [
@@ -18,7 +18,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     items: [
       { to: '/', label: '대시보드', roles: ALL },
       { to: '/summary', label: '투입집계', roles: ALL },
-      { to: '/items', label: '월별 품목', roles: OFFICE },
+      { to: '/items', label: '월별 품목', roles: [...OFFICE, 'executive'] },
     ],
   },
   {

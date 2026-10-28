@@ -1,10 +1,11 @@
 // 공통 타입 정의 — Firestore 컬렉션 구조와 1:1로 맞춘다.
 
-export type Role = 'admin' | 'material' | 'siteManager' | 'siteStaff';
+export type Role = 'admin' | 'material' | 'executive' | 'siteManager' | 'siteStaff';
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: '관리자',
   material: '자재부',
+  executive: '결재자(대표·사장)',
   siteManager: '현장소장',
   siteStaff: '현장담당',
 };

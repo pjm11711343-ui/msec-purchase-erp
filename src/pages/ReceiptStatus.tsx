@@ -6,12 +6,14 @@ import { poProgress, receivedMap, useReceipts } from '../lib/receipts';
 import { useSites } from '../lib/hooks';
 import { won } from '../lib/normalize';
 import ReceiptPanel from '../components/ReceiptPanel';
+import { useAuth } from '../auth/AuthContext';
 import { Empty, PageHeader, RateBar, Stat } from '../components/ui';
 
 type St = '' | '미입고' | '부분입고' | '입고완료';
 
 export default function ReceiptStatus() {
   const pos = usePurchaseOrders();
+  const { readOnly } = useAuth();
   const receipts = useReceipts();
   const sites = useSites();
   const [tab, setTab] = useState<'po' | 'log'>('po');
@@ -124,7 +126,7 @@ export default function ReceiptStatus() {
                         <td>{unconfirmed ? <span className="chip bg-amber-soft text-amber-800">{unconfirmed}건</span> : ''}</td>
                         <td className="text-right">
                           <button className="btn-ghost h-7 text-[12px]" onClick={() => setOpen(open === p.id ? null : p.id)}>
-                            {open === p.id ? '닫기' : '입고 입력·확인'}
+                            {open === p.id ? '닫기' : readOnly ? '입고 내역' : '입고 입력·확인'}
                           </button>
                         </td>
                       </tr>
