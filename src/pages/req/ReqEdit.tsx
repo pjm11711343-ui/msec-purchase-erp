@@ -419,7 +419,7 @@ export default function ReqEdit() {
     <div>
       <PageHeader
         title={isNew ? '구매청구서 작성' : `구매청구서 ${d.docNo || ''}`}
-        desc={d.id ? `${d.siteName} · 작성 ${d.createdByName}` : '품목을 입력하고 결재를 올리세요. 단가는 단가표 → 직전 발주 순으로 자동으로 채웁니다.'}
+        desc={d.id ? `${d.siteName} · 작성 ${d.createdByName}` : '품목을 입력하고 결재를 올리세요. 단가는 최신 계산서 단가(이 현장 → 전체) → 단가표 → 직전 발주 순으로 자동으로 채웁니다.'}
         actions={
           <>
             <Link to="/req" className="btn-ghost">
