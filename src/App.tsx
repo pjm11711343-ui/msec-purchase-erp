@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Summary from './pages/Summary';
 import Invoices from './pages/Invoices';
 import InvoiceMatch from './pages/InvoiceMatch';
+import ItemLedger from './pages/ItemLedger';
 import ReqList from './pages/req/ReqList';
 import ReqEdit from './pages/req/ReqEdit';
 import PoList from './pages/po/PoList';
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="receipt" element={<ReceiptStatus />} />
         <Route path="invoices" element={<Guard roles={OFFICE}><Invoices /></Guard>} />
         <Route path="invoices/:id" element={<Guard roles={OFFICE}><InvoiceMatch /></Guard>} />
+        <Route path="items" element={<Guard roles={OFFICE}><ItemLedger /></Guard>} />
         <Route path="import/requisition" element={<Guard roles={OFFICE}><ImportRequisition /></Guard>} />
         <Route path="master/sites" element={<Guard roles={OFFICE}><Sites /></Guard>} />
         <Route path="master/vendors" element={<Guard roles={OFFICE}><Vendors /></Guard>} />

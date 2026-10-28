@@ -18,6 +18,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     items: [
       { to: '/', label: '대시보드', roles: ALL },
       { to: '/summary', label: '투입집계', roles: ALL },
+      { to: '/items', label: '월별 품목', roles: OFFICE },
     ],
   },
   {
