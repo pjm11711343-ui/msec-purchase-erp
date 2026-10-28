@@ -7,6 +7,7 @@ import { C } from '../../lib/firebase';
 import { useSites } from '../../lib/hooks';
 import { won } from '../../lib/normalize';
 import { preOrderState, usePurchaseOrders } from '../../lib/pos';
+import { usePoPrices } from '../../lib/poPrices';
 import { useRequisitions } from '../../lib/reqs';
 import { errMsg, useToast } from '../../components/ui';
 import { PoChip, PreChip } from './PoList';
@@ -42,6 +43,7 @@ export default function PoDetail() {
   const isOffice = can('admin', 'material');
   const pos = usePurchaseOrders();
   const reqs = useRequisitions();
+  const prices = usePoPrices();
   const sites = useSites();
   const toast = useToast();
   const po = pos.data.find((p) => p.id === id);
@@ -224,6 +226,25 @@ export default function PoDetail() {
           </div>
         </div>
       )}
+
+      {isOffice && (() => {
+        const pend = prices.data.filter((p) => p.poId === po.id && p.kind === 'change' && p.status === 'pending');
+        const byVendor = po.lines.filter((l) => l.priceBy === 'vendor');
+        if (!pend.length && !byVendor.length) return null;
+        return (
+          <div className="no-print mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[12.5px] text-violet-800">
+            {pend.length > 0 && (
+              <div>
+                업체가 단가 변경을 요청했습니다 ({pend.length}건): {pend.map((p) => `${p.itemName} ${p.spec} ${won(p.oldPrice)}→${won(p.price)}원`).join(', ')}{' '}
+                <Link to="/po" className="font-semibold underline">
+                  발주 › 업체 단가 요청에서 처리
+                </Link>
+              </div>
+            )}
+            {byVendor.length > 0 && <div>업체가 기입·변경한 단가: {byVendor.map((l) => `${l.itemName} ${l.spec} ${won(l.price)}원${l.priceOld ? ` (전 ${won(l.priceOld)})` : ''}`).join(', ')}</div>}
+          </div>
+        );
+      })()}
 
       <PoSheet po={po} site={site} boxes={b} internal={internal} showPrice={showPrice} pad={pad} />
 

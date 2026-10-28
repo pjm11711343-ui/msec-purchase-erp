@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { usePurchaseOrders } from '../lib/pos';
+import { usePoPrices } from '../lib/poPrices';
 import { poProgress, receivedMap, useReceipts } from '../lib/receipts';
 import { useSites } from '../lib/hooks';
 import { won } from '../lib/normalize';
@@ -15,6 +16,7 @@ export default function ReceiptStatus() {
   const pos = usePurchaseOrders();
   const { readOnly } = useAuth();
   const receipts = useReceipts();
+  const prices = usePoPrices();
   const sites = useSites();
   const [tab, setTab] = useState<'po' | 'log'>('po');
   const [siteF, setSiteF] = useState('');
@@ -134,7 +136,7 @@ export default function ReceiptStatus() {
                         <tr>
                           <td colSpan={9} className="bg-white p-0">
                             <div className="m-2 rounded-xl border border-amber-brand/50">
-                              <ReceiptPanel po={p} receipts={receipts.data} />
+                              <ReceiptPanel po={p} receipts={receipts.data} prices={prices.data} />
                             </div>
                           </td>
                         </tr>

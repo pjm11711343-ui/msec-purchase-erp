@@ -1,6 +1,15 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL, type Role } from '../types';
+import { usePurchaseOrders } from '../lib/pos';
+import { usePoPriceSync } from '../lib/poPrices';
+
+/** 업체가 기입한 빈 단가를 발주서에 옮겨 적는다 (자재부·관리자 화면이 열려 있을 때) */
+function PoPriceSync() {
+  const pos = usePurchaseOrders();
+  usePoPriceSync(pos.data, !pos.loading);
+  return null;
+}
 
 interface Item {
   to: string;
@@ -112,6 +121,7 @@ export default function Layout() {
               </button>
             </div>
           )}
+          {(role === 'admin' || role === 'material') && <PoPriceSync />}
           <Outlet />
         </div>
       </main>

@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { audit, commitBatch, newId } from '../lib/db';
 import { C } from '../lib/firebase';
-import { num } from '../lib/normalize';
+import { num, won } from '../lib/normalize';
+import { priceDocId, type PoPrice } from '../lib/poPrices';
 import { poLineKey, today } from '../lib/receipts';
 import { commaText, errMsg, useToast } from './ui';
 import type { PurchaseOrder, Receipt } from '../types';
 
 /** 발주서 한 장의 입고 입력 + 입고 기록 */
-export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; receipts: Receipt[] }) {
+export default function ReceiptPanel({ po, receipts, prices = [] }: { po: PurchaseOrder; receipts: Receipt[]; prices?: PoPrice[] }) {
   const { profile, vendor, can, readOnly } = useAuth();
   const toast = useToast();
   const mine = receipts.filter((r) => r.poId === po.id);
@@ -21,6 +22,10 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
   const canConfirm = !vendor && (can('admin', 'material', 'siteManager', 'siteStaff'));
   const isVendor = !!vendor;
   const who = vendor ? vendor.vendorName : (profile?.name ?? '');
+  const showPrice = isVendor || can('admin', 'material') || readOnly;
+  const [priceIn, setPriceIn] = useState<Record<string, string>>({}); // 빈 단가 기입
+  const [chg, setChg] = useState<{ k: string; price: string; note: string } | null>(null); // 단가 변경 요청 입력
+  const reqOf = (k: string) => prices.find((p) => p.id === priceDocId(po.id, k));
 
   const rows = po.lines.map((l) => {
     const k = poLineKey(l);
@@ -31,6 +36,36 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
   const register = async (keys: string[], useRemain: boolean) => {
     if (!date) return toast('입고일을 입력하세요.', 'err');
     const ops: Parameters<typeof commitBatch>[0] = [];
+    // 업체: 단가가 비어 있는 줄은 단가를 넣어야 입고 등록
+    if (isVendor) {
+      const target = rows.filter((x) => keys.includes(x.k) && (useRemain ? x.remain : num(qty[x.k] ?? x.remain)) > 0);
+      const miss = target.filter((x) => !x.l.price && !(num(priceIn[x.k]) > 0));
+      if (miss.length) return toast(`단가가 비어 있는 줄이 ${miss.length}개 있습니다. 단가를 입력해야 입고 등록할 수 있습니다: ${miss.slice(0, 3).map((x) => `${x.l.itemName} ${x.l.spec}`).join(', ')}`, 'err');
+      for (const x of target.filter((t) => !t.l.price)) {
+        const p: Omit<PoPrice, 'id'> = {
+          poId: po.id,
+          poNo: po.poNo,
+          siteId: po.siteId,
+          siteName: po.siteName,
+          vendorId: po.vendorId,
+          vendorName: po.vendorName,
+          lineKey: x.k,
+          itemName: x.l.itemName,
+          spec: x.l.spec,
+          unit: x.l.unit,
+          qty: x.l.qty,
+          oldPrice: 0,
+          price: num(priceIn[x.k]),
+          kind: 'fill',
+          status: 'approved',
+          applied: false,
+          by: vendor?.id ?? '',
+          byName: who,
+          at: Date.now(),
+        };
+        ops.push({ type: 'set', col: C.poPrices, id: priceDocId(po.id, x.k), data: p, merge: false });
+      }
+    }
     for (const r of rows.filter((x) => keys.includes(x.k))) {
       const q = useRemain ? r.remain : num(qty[r.k] ?? r.remain);
       if (q <= 0) continue;
@@ -55,15 +90,58 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
       };
       ops.push({ type: 'set', col: C.receipts, id: newId(C.receipts), data: rec, merge: false });
     }
-    if (!ops.length) return toast('입고할 수량이 없습니다.', 'err');
+    if (!ops.some((o) => o.col === C.receipts)) return toast('입고할 수량이 없습니다.', 'err');
     setBusy(true);
     try {
       await commitBatch(ops);
-      await audit('입고 등록', po.poNo, { lines: ops.length, date });
-      toast(`${ops.length}줄 입고를 등록했습니다.`);
+      const n = ops.filter((o) => o.col === C.receipts).length;
+      await audit('입고 등록', po.poNo, { lines: n, date });
+      toast(`${n}줄 입고를 등록했습니다.`);
       setPick(new Set());
       setQty({});
+      setPriceIn({});
       setNote('');
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 업체: 단가 변경 요청 (자재부 승인 후 발주서에 반영) */
+  const requestChange = async () => {
+    if (!chg) return;
+    const r = rows.find((x) => x.k === chg.k);
+    const price = num(chg.price);
+    if (!r || !(price > 0)) return toast('바꿀 단가를 입력하세요.', 'err');
+    if (price === r.l.price) return toast('지금 단가와 같습니다.', 'err');
+    const p: Omit<PoPrice, 'id'> = {
+      poId: po.id,
+      poNo: po.poNo,
+      siteId: po.siteId,
+      siteName: po.siteName,
+      vendorId: po.vendorId,
+      vendorName: po.vendorName,
+      lineKey: r.k,
+      itemName: r.l.itemName,
+      spec: r.l.spec,
+      unit: r.l.unit,
+      qty: r.l.qty,
+      oldPrice: r.l.price,
+      price,
+      kind: 'change',
+      status: 'pending',
+      applied: false,
+      ...(chg.note.trim() ? { note: chg.note.trim() } : {}),
+      by: vendor?.id ?? '',
+      byName: who,
+      at: Date.now(),
+    };
+    setBusy(true);
+    try {
+      await commitBatch([{ type: 'set', col: C.poPrices, id: priceDocId(po.id, r.k), data: p, merge: false }]);
+      toast('단가 변경을 요청했습니다. 명신기공 자재부가 승인하면 발주서 단가가 바뀝니다.');
+      setChg(null);
     } catch (e) {
       toast(errMsg(e), 'err');
     } finally {
@@ -121,6 +199,7 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
             <th>규격</th>
             <th>단위</th>
             <th className="num">발주</th>
+            {showPrice && <th className="num w-44">단가</th>}
             <th className="num">입고 누계</th>
             <th className="num">남은 수량</th>
             <th className="num">이번 입고</th>
@@ -150,6 +229,60 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
               <td>{r.l.spec}</td>
               <td>{r.l.unit}</td>
               <td className="num">{r.l.qty.toLocaleString()}</td>
+              {showPrice && (
+                <td className="num">
+                  {(() => {
+                    const rq = reqOf(r.k);
+                    const pending = rq?.kind === 'change' && rq.status === 'pending';
+                    if (!r.l.price) {
+                      return isVendor && !readOnly ? (
+                        <input
+                          className="input h-7 w-28 border-amber-brand bg-amber-soft px-1.5 text-right"
+                          placeholder="단가 입력 (필수)"
+                          value={priceIn[r.k] ?? ''}
+                          onChange={(e) => setPriceIn((m) => ({ ...m, [r.k]: commaText(e.target.value) }))}
+                        />
+                      ) : (
+                        <span className="text-amber-700">단가 없음</span>
+                      );
+                    }
+                    if (chg?.k === r.k)
+                      return (
+                        <div className="flex flex-col items-end gap-1">
+                          <input className="input h-7 w-28 px-1.5 text-right" autoFocus placeholder="바꿀 단가" value={chg.price} onChange={(e) => setChg({ ...chg, price: commaText(e.target.value) })} />
+                          <input className="input h-7 w-40 px-1.5" placeholder="사유 (예: 원자재 인상)" value={chg.note} onChange={(e) => setChg({ ...chg, note: e.target.value })} />
+                          <div className="flex gap-1">
+                            <button className="btn-ghost h-6 px-2 text-[11px]" onClick={() => setChg(null)}>
+                              취소
+                            </button>
+                            <button className="btn-primary h-6 px-2 text-[11px]" disabled={busy} onClick={requestChange}>
+                              변경 요청
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    return (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="font-semibold">
+                          {won(r.l.price)}
+                          {r.l.priceBy === 'vendor' && <span className="ml-1 text-[10.5px] font-normal text-violet-700">{r.l.priceOld ? `변경 (전 ${won(r.l.priceOld)})` : '업체 기입'}</span>}
+                        </span>
+                        {pending && <span className="chip bg-violet-50 text-violet-700">변경 요청 {won(rq.price)}원 · 승인 대기</span>}
+                        {rq?.kind === 'change' && rq.status === 'rejected' && isVendor && (
+                          <span className="chip bg-red-50 text-red-700" title={rq.decideNote}>
+                            요청 {won(rq.price)}원 거절{rq.decideNote ? ` · ${rq.decideNote}` : ''}
+                          </span>
+                        )}
+                        {isVendor && !readOnly && !pending && (
+                          <button className="text-[11px] text-navy-900 hover:underline" onClick={() => setChg({ k: r.k, price: '', note: '' })}>
+                            단가 수정 요청
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </td>
+              )}
               <td className="num">{r.received ? r.received.toLocaleString() : ''}</td>
               <td className={`num font-semibold ${r.remain ? '' : 'text-emerald-600'}`}>{r.remain ? r.remain.toLocaleString() : '완료'}</td>
               <td className="num">

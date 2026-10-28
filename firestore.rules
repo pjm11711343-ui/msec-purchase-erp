@@ -117,6 +117,22 @@ service cloud.firestore {
       allow delete: if isOffice()
         || (isVendor() && resource.data.enteredBy == request.auth.uid && resource.data.get('confirmed', false) == false);
     }
+    // 업체 단가 기입(빈 단가)·변경 요청. 발주서 반영은 사내(자재부·관리자)가 한다
+    function vendorPriceOk(id) {
+      let d = request.resource.data;
+      return d.vendorId == myVendor()
+        && id == d.poId + '__' + d.lineKey
+        && get(/databases/$(database)/documents/erp_purchaseOrders/$(d.poId)).data.vendorId == myVendor()
+        && d.get('applied', false) == false
+        && d.price is number && d.price > 0
+        && ((d.kind == 'change' && d.status == 'pending') || (d.kind == 'fill' && d.status == 'approved' && d.oldPrice == 0));
+    }
+    match /erp_poPrices/{id} {
+      allow read: if isOffice() || isExec() || (isVendor() && resource.data.vendorId == myVendor());
+      allow create: if isOffice() || (isVendor() && vendorPriceOk(id));
+      allow update: if isOffice() || (isVendor() && resource.data.vendorId == myVendor() && vendorPriceOk(id));
+      allow delete: if isOffice();
+    }
     match /erp_vendorAccounts/{uid} {
       allow read: if (erpSignedIn() && request.auth.uid == uid) || isOffice();
       allow write: if isAdmin();

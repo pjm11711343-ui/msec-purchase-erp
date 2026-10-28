@@ -59,6 +59,7 @@ export const C = {
   requisitions: 'erp_requisitions',
   purchaseOrders: 'erp_purchaseOrders',
   receipts: 'erp_receipts',
+  poPrices: 'erp_poPrices',
   vendorAccounts: 'erp_vendorAccounts',
   ledgerMeta: 'erp_ledgerMeta', // 월별 품목: itemAlias(품목 합치기), gipyo(집계표 금액)
 } as const;

@@ -2,6 +2,7 @@ import { orderBy, where } from 'firebase/firestore';
 import { useAuth } from '../auth/AuthContext';
 import { useCollection, useSiteScoped } from './db';
 import { C } from './firebase';
+import { usePoPrices, withVendorPrices } from './poPrices';
 import type { PoLine, PurchaseOrder, Receipt } from '../types';
 
 /** 사내: 전체 또는 담당 현장 / 업체: 자기 업체 것만 */
@@ -14,11 +15,19 @@ export function useReceipts() {
   return { ...src, data: [...src.data].sort((a, b) => b.createdAt - a.createdAt) };
 }
 
-/** 업체 포털: 자기 업체 발주서 */
+/** 업체 포털: 자기 업체 발주서 (업체가 기입한 단가를 덧씌움) + 단가 요청 */
 export function useVendorPOs() {
   const { vendor } = useAuth();
   const r = useCollection<PurchaseOrder>(C.purchaseOrders, vendor ? [where('vendorId', '==', vendor.vendorId)] : [], vendor?.vendorId ?? '', !!vendor);
-  return { ...r, data: r.data.filter((p) => p.status !== 'cancelled').sort((a, b) => b.createdAt - a.createdAt) };
+  const prices = usePoPrices();
+  return {
+    ...r,
+    prices: prices.data,
+    data: r.data
+      .filter((p) => p.status !== 'cancelled')
+      .map((p) => withVendorPrices(p, prices.data))
+      .sort((a, b) => b.createdAt - a.createdAt),
+  };
 }
 
 export const poLineKey = (l: PoLine) => `${l.reqId}|${l.lineKey}`;

@@ -246,6 +246,8 @@ export interface PoLine {
   location?: string;
   siteCategoryId?: string;
   receivedQty?: number; // 4단계 입고 누계
+  priceBy?: 'vendor'; // 업체가 기입·변경한 단가
+  priceOld?: number; // 변경 전 단가 (업체 변경 요청 승인)
 }
 
 export interface PurchaseOrder {

@@ -7,6 +7,7 @@ import { useSites, useVendors } from '../../lib/hooks';
 import { won } from '../../lib/normalize';
 import { nextPoNo, pendingLines, preOrderState, usePurchaseOrders, type PendingLine, type PreState } from '../../lib/pos';
 import { useRequisitions } from '../../lib/reqs';
+import { decidePrices, usePoPrices, type PoPrice } from '../../lib/poPrices';
 import { Empty, errMsg, PageHeader, useSelection, useToast } from '../../components/ui';
 import { PO_STATUS_LABEL, type PoLine, type PoStatus, type PurchaseOrder } from '../../types';
 
@@ -42,7 +43,25 @@ export default function PoList() {
   const vendors = useVendors();
   const toast = useToast();
   const { sel, toggle, setAll, clear } = useSelection();
-  const [tab, setTab] = useState<'pending' | 'list'>(isOffice ? 'pending' : 'list');
+  const [tab, setTab] = useState<'pending' | 'list' | 'price'>(isOffice ? 'pending' : 'list');
+  const prices = usePoPrices();
+  const priceReqs = useMemo(() => prices.data.filter((p) => p.kind === 'change' && p.status === 'pending').sort((a, b) => b.at - a.at), [prices.data]);
+  const priceDone = useMemo(() => prices.data.filter((p) => p.applied).sort((a, b) => (b.appliedAt ?? 0) - (a.appliedAt ?? 0)).slice(0, 50), [prices.data]);
+  const [rejNote, setRejNote] = useState<Record<string, string>>({});
+  const decide = async (list: PoPrice[], ok: boolean) => {
+    if (!list.length) return;
+    if (!ok && list.some((p) => !rejNote[p.id]?.trim())) return toast('거절 사유를 적어 주세요.', 'err');
+    setBusy(true);
+    try {
+      await decidePrices(pos.data, list.map((p) => ({ p, ok, ...(ok ? {} : { note: rejNote[p.id].trim() }) })), profile?.name ?? '');
+      await audit(ok ? '업체 단가 변경 승인' : '업체 단가 변경 거절', list.map((p) => `${p.poNo} ${p.itemName}`).join(', '));
+      toast(ok ? `${list.length}건 단가를 바꿨습니다.` : `${list.length}건 거절했습니다.`);
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
   const [vendorPick, setVendorPick] = useState<Record<string, string>>({}); // 거래선 미지정 줄 → 업체
   const [siteF, setSiteF] = useState('');
   const [statusF, setStatusF] = useState<'' | PoStatus>('');
@@ -203,6 +222,12 @@ export default function PoList() {
           <button className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${tab === 'list' ? 'bg-navy-950 text-white' : 'text-muted hover:bg-canvas'}`} onClick={() => setTab('list')}>
             발주서 목록
           </button>
+          {isOffice && (
+            <button className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${tab === 'price' ? 'bg-navy-950 text-white' : 'text-muted hover:bg-canvas'}`} onClick={() => setTab('price')}>
+              업체 단가 요청
+              {priceReqs.length > 0 && <span className="ml-1 rounded-full bg-violet-600 px-1.5 text-[11px] text-white">{priceReqs.length}</span>}
+            </button>
+          )}
           {isOffice && tab === 'pending' && (
             <label className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] ${withPre ? 'bg-violet-50 text-violet-800' : 'text-muted'}`} title="결재가 끝나기 전의 청구서 줄도 먼저 발주합니다 (자재부·관리자)">
               <input type="checkbox" checked={withPre} onChange={(e) => setWithPre(e.target.checked)} />
@@ -234,7 +259,125 @@ export default function PoList() {
           </div>
         </div>
 
-        {tab === 'pending' ? (
+        {tab === 'price' ? (
+          <div className="max-h-[calc(100vh-220px)] overflow-auto">
+            <div className="flex items-center gap-2 px-4 py-2">
+              <span className="font-semibold">단가 변경 요청 {priceReqs.length}건</span>
+              <span className="text-[12px] text-muted">업체가 발주서 단가를 바꿔 달라고 요청한 것입니다. 승인하면 발주서 단가가 바뀝니다.</span>
+              {priceReqs.length > 1 && (
+                <button className="btn-primary ml-auto h-7 text-[12px]" disabled={busy} onClick={() => confirm(`${priceReqs.length}건을 모두 승인할까요?`) && decide(priceReqs, true)}>
+                  모두 승인
+                </button>
+              )}
+            </div>
+            {!priceReqs.length ? (
+              <Empty>승인 대기 중인 단가 변경 요청이 없습니다.</Empty>
+            ) : (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>요청일</th>
+                    <th>발주번호</th>
+                    <th>현장</th>
+                    <th>업체</th>
+                    <th>품명</th>
+                    <th>규격</th>
+                    <th className="num">수량</th>
+                    <th className="num">지금 단가</th>
+                    <th className="num">요청 단가</th>
+                    <th className="num">차이</th>
+                    <th>사유</th>
+                    <th className="w-[260px]"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceReqs.map((p) => {
+                    const po = pos.data.find((x) => x.id === p.poId);
+                    const cur = po?.lines.find((l) => `${l.reqId}|${l.lineKey}` === p.lineKey)?.price ?? p.oldPrice;
+                    const diff = p.price - cur;
+                    return (
+                      <tr key={p.id}>
+                        <td className="whitespace-nowrap">{new Date(p.at).toLocaleDateString('ko-KR')}</td>
+                        <td>
+                          <Link to={`/po/${p.poId}`} className="font-semibold text-navy-900 hover:underline">
+                            {p.poNo}
+                          </Link>
+                        </td>
+                        <td>{p.siteName}</td>
+                        <td>{p.vendorName}</td>
+                        <td>{p.itemName}</td>
+                        <td>{p.spec}</td>
+                        <td className="num">{p.qty.toLocaleString()}</td>
+                        <td className="num">{won(cur)}</td>
+                        <td className="num font-semibold">{won(p.price)}</td>
+                        <td className={`num ${diff > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                          {diff > 0 ? '+' : ''}
+                          {won(diff)}
+                          {cur ? <span className="ml-1 text-[11px]">({diff > 0 ? '+' : ''}{((diff / cur) * 100).toFixed(1)}%)</span> : null}
+                        </td>
+                        <td className="text-muted">{p.note}</td>
+                        <td>
+                          <div className="flex items-center justify-end gap-1">
+                            <input className="input h-7 w-28 px-1.5 text-[12px]" placeholder="거절 사유" value={rejNote[p.id] ?? ''} onChange={(e) => setRejNote((m) => ({ ...m, [p.id]: e.target.value }))} />
+                            <button className="btn-ghost h-7 text-[12px]" disabled={busy} onClick={() => decide([p], false)}>
+                              거절
+                            </button>
+                            <button className="btn-primary h-7 text-[12px]" disabled={busy} onClick={() => decide([p], true)}>
+                              승인
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {priceDone.length > 0 && (
+              <>
+                <div className="border-t border-line px-4 py-2 font-semibold">최근 처리 (업체 기입·승인·거절)</div>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>처리일</th>
+                      <th>구분</th>
+                      <th>발주번호</th>
+                      <th>업체</th>
+                      <th>품명</th>
+                      <th>규격</th>
+                      <th className="num">전 단가</th>
+                      <th className="num">단가</th>
+                      <th>결과</th>
+                      <th>처리</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priceDone.map((p) => (
+                      <tr key={p.id}>
+                        <td className="whitespace-nowrap">{p.appliedAt ? new Date(p.appliedAt).toLocaleDateString('ko-KR') : ''}</td>
+                        <td>{p.kind === 'fill' ? '빈 단가 기입' : '변경 요청'}</td>
+                        <td>
+                          <Link to={`/po/${p.poId}`} className="text-navy-900 hover:underline">
+                            {p.poNo}
+                          </Link>
+                        </td>
+                        <td>{p.vendorName}</td>
+                        <td>{p.itemName}</td>
+                        <td>{p.spec}</td>
+                        <td className="num text-muted">{p.oldPrice ? won(p.oldPrice) : '-'}</td>
+                        <td className="num">{won(p.price)}</td>
+                        <td>
+                          {p.status === 'approved' ? <span className="chip bg-emerald-50 text-emerald-700">반영</span> : <span className="chip bg-red-50 text-red-700" title={p.decideNote}>거절{p.decideNote ? ` · ${p.decideNote}` : ''}</span>}
+                        </td>
+                        <td className="text-muted">{p.decidedByName ?? '업체 기입'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        ) : tab === 'pending' ? (
           !groups.size ? (
             <Empty>{reqs.loading ? '불러오는 중…' : withPre ? '발주할 품목이 없습니다.' : '발주할 품목이 없습니다. 구매청구가 최종 승인되면 여기에 나타납니다. 결재 중인 청구서를 먼저 발주하려면 위의 \'결재 중 청구서도 보기 (선발주)\'를 켜세요.'}</Empty>
           ) : (

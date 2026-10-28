@@ -141,7 +141,7 @@ export default function VendorPortal() {
             </div>
             {view === 'receipt' ? (
               <div className="card overflow-hidden">
-                <ReceiptPanel po={cur} receipts={receipts.data} />
+                <ReceiptPanel po={cur} receipts={receipts.data} prices={pos.prices} />
               </div>
             ) : (
               <PoSheet po={cur} site={sites.data.find((s) => s.id === cur.siteId)} boxes={signBoxes(cur)} internal={false} showPrice pad={Math.max(0, MIN_ROWS - cur.lines.length)} />
