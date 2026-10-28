@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { refreshCatalog } from '../../lib/itemCatalog';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, useSettings } from '../../lib/db';
 import { C } from '../../lib/firebase';
@@ -193,6 +194,7 @@ export default function LedgerImport({ invoices }: { invoices: Invoice[] }) {
       if (withGipyo && data.d.gipyo?.list?.length) await saveGipyo(data.d.gipyo);
       await audit('예전 품목관리 자료 가져오기', data.name, { invoices: go.length, rows: go.reduce((a, g) => a + g.rows.length, 0) });
       toast(`계산서 ${go.length}건을 옮겼습니다.`);
+      refreshCatalog();
       setData(null);
     } catch (e) {
       toast(errMsg(e), 'err');

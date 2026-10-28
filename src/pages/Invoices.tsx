@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
+import { refreshCatalog } from '../lib/itemCatalog';
 import { orderBy, where } from 'firebase/firestore';
 import { readWorkbook, parseInvoiceWorkbook, type ParsedInvoiceFile } from '../lib/parsers';
 import { audit, commitBatch, fetchWhere, newId, useCollection, useSettings } from '../lib/db';
@@ -267,6 +268,7 @@ export default function Invoices() {
       await commitBatch(ops);
       await audit('계산서정리 업로드', files.map((f) => f.parsed.fileName).join(', '), { invoices: invoiceDocs.size });
       toast(`계산서 ${invoiceDocs.size}건을 저장했습니다.`);
+      refreshCatalog();
       setFiles([]);
     } catch (e) {
       toast(errMsg(e), 'err');
@@ -282,6 +284,7 @@ export default function Invoices() {
       await commitBatch([...old.map((e) => ({ type: 'delete' as const, col: C.ledger, id: e.id })), { type: 'delete', col: C.invoices, id: inv.id }]);
       await audit('계산서 삭제', inv.id);
       toast('삭제했습니다.');
+      refreshCatalog();
     } catch (e) {
       toast(errMsg(e), 'err');
     }

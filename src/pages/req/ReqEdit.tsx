@@ -14,6 +14,8 @@ import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
+import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
+import { normItem, normSpec } from '../../lib/itemNorm';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
 const TEMPLATES: Record<Requisition['approvalType'], string[]> = {
@@ -102,44 +104,59 @@ export default function ReqEdit() {
 
   const prior = useMemo(() => (d ? priorQtyMap(reqs.data, d.siteId, d.id) : new Map<string, number>()), [reqs.data, d?.siteId, d?.id]);
   const siteCats = cats.data.filter((c) => c.siteId === d?.siteId).sort((a, b) => a.order - b.order);
-  const itemOptions = useMemo(() => {
-    const s = new Set<string>();
-    prices.rows.forEach((p) => s.add(p.itemName));
-    reqs.data.forEach((r) => r.lines.forEach((l) => l.itemName && s.add(l.itemName)));
-    return [...s].sort((a, b) => a.localeCompare(b, 'ko'));
-  }, [prices.rows, reqs.data]);
-  const itemSet = useMemo(() => new Set(itemOptions.map(nameKey)), [itemOptions]);
-  // 품명별 규격 / 품명·규격별 단위 목록 (단가표 + 지난 청구서)
-  const specUnit = useMemo(() => {
-    const specs = new Map<string, Set<string>>();
-    const units = new Map<string, Set<string>>();
+  // 품명·규격 목록: 월별 품목명세(계산서) + 단가표 + 지난 청구서. 같은 품목(표기 차이)은 한 줄, 계산서 표기를 먼저 씀
+  const catalog = useItemCatalog();
+  const lists = useMemo(() => {
+    const items = new Map<string, string>(); // normItem → 표시 이름
+    const specs = new Map<string, Map<string, string>>(); // normItem → (normSpec → 표시 규격)
+    const units = new Map<string, Set<string>>(); // normItem|normSpec → 단위
     const unitsItem = new Map<string, Set<string>>();
-    const add = (m: Map<string, Set<string>>, k: string, v: string) => {
-      if (!v) return;
-      const set = m.get(k) ?? new Set<string>();
-      set.add(v);
-      m.set(k, set);
-    };
+    const cat = new Map<string, CatItem>(); // normItem|normSpec → 계산서 최신 단가
     const put = (item: string, spec: string, unit: string) => {
-      const ik = nameKey(item);
-      if (!ik) return;
-      add(specs, ik, (spec ?? '').trim());
-      add(units, `${ik}|${nameKey(spec)}`, (unit ?? '').trim());
-      add(unitsItem, ik, (unit ?? '').trim());
+      const ni = normItem(item);
+      if (!ni) return;
+      if (!items.has(ni)) items.set(ni, item.trim());
+      const sp = (spec ?? '').trim();
+      if (sp) {
+        const m = specs.get(ni) ?? new Map<string, string>();
+        if (!m.has(normSpec(sp))) m.set(normSpec(sp), sp);
+        specs.set(ni, m);
+      }
+      const u = (unit ?? '').trim();
+      if (u) {
+        const k = `${ni}|${normSpec(sp)}`;
+        units.set(k, (units.get(k) ?? new Set()).add(u));
+        unitsItem.set(ni, (unitsItem.get(ni) ?? new Set()).add(u));
+      }
     };
+    for (const c of catalog.items) {
+      put(c.i, c.s, c.u);
+      cat.set(`${normItem(c.i)}|${normSpec(c.s)}`, c);
+    }
     prices.rows.forEach((p) => put(p.itemName, p.spec, p.unit));
     reqs.data.forEach((r) => r.lines.forEach((l) => put(l.itemName, l.spec, l.unit)));
-    return { specs, units, unitsItem };
-  }, [prices.rows, reqs.data]);
+    return { items, specs, units, unitsItem, cat };
+  }, [catalog.items, prices.rows, reqs.data]);
+  const itemOptions = useMemo(() => [...lists.items.values()].sort((a, b) => a.localeCompare(b, 'ko')), [lists]);
+  const itemSet = useMemo(() => new Set(lists.items.keys()), [lists]);
   const sizeOf = (s: string) => {
     const m = s.match(/(\d+(?:\.\d+)?)/);
     return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
   };
-  const specOptions = (item: string) => [...(specUnit.specs.get(nameKey(item)) ?? [])].sort((a, b) => sizeOf(a) - sizeOf(b) || a.localeCompare(b, 'ko'));
+  const specOptions = (item: string) => [...(lists.specs.get(normItem(item))?.values() ?? [])].sort((a, b) => sizeOf(a) - sizeOf(b) || a.localeCompare(b, 'ko'));
+  const specOk = (item: string, spec: string) => specOptions(item).some((x) => normSpec(x) === normSpec(spec));
+  const unitsOf = (item: string, spec: string) => lists.units.get(`${normItem(item)}|${normSpec(spec)}`);
   const unitOptions = (item: string, spec: string) => {
-    const exact = [...(specUnit.units.get(`${nameKey(item)}|${nameKey(spec)}`) ?? [])];
-    const byItem = [...(specUnit.unitsItem.get(nameKey(item)) ?? [])];
+    const exact = [...(unitsOf(item, spec) ?? [])];
+    const byItem = [...(lists.unitsItem.get(normItem(item)) ?? [])];
     return [...new Set([...exact, ...byItem, ...COMMON_UNITS])].filter((u) => !HIDDEN_UNITS.has(u));
+  };
+  /** 계산서 최신 단가: 같은 현장 → 회사 전체 */
+  const invoicePrice = (item: string, spec: string, siteId?: string): (LastPrice & { scope: '현장' | '전체' }) | undefined => {
+    const c = lists.cat.get(`${normItem(item)}|${normSpec(spec)}`);
+    if (!c) return undefined;
+    const sp = siteId ? c.site[siteId] : undefined;
+    return sp ? { ...sp, scope: '현장' } : { ...c.last, scope: '전체' };
   };
 
   if (!d) return <div className="text-muted">{reqs.loading || sites.loading ? '불러오는 중…' : '청구서를 찾을 수 없습니다.'}</div>;
@@ -154,9 +171,15 @@ export default function ReqEdit() {
 
   const setLine = (key: string, patch: Partial<ReqLine>) => setD((x) => x && { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
-  /** 단가 자동: 거래선 단가 → 최저 단가 → 직전 발주단가 */
+  /** 단가 자동: 최신 계산서 단가(같은 현장 → 전체) → 단가표(거래선 → 최저) → 직전 발주단가 */
   const suggest = (l: ReqLine): Partial<ReqLine> => {
     if (!l.itemName) return {};
+    const ip = invoicePrice(l.itemName, l.spec, d.siteId);
+    if (ip) {
+      const u = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`)?.u;
+      const iv = !l.vendorId ? vendors.data.find((x) => x.id === ip.vid) : undefined;
+      return { orderPrice: ip.p, priceSource: '계산서', ...(u && !l.unit ? { unit: u } : {}), ...(iv ? { vendorId: iv.id, vendorName: iv.name } : {}) };
+    }
     const cands = findPrices(prices.rows, l.itemName, l.spec);
     const v = vendors.data.find((x) => x.id === l.vendorId);
     const forVendor = v ? cands.find((p) => sameVendor(p.vendorName, v.name, v.aliases)) : undefined;
@@ -176,24 +199,24 @@ export default function ReqEdit() {
     });
 
   /** 품명·규격은 목록에서 고른 값만. 바꾸면 자동 단가는 다시 찾는다 */
-  const resetAuto = (l: ReqLine): Partial<ReqLine> => (l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {});
+  const resetAuto = (l: ReqLine): Partial<ReqLine> => (l.priceSource === '계산서' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {});
   const pickItem = (key: string, v: string) => {
     const l = d.lines.find((x) => x.key === key);
     if (!l || v === l.itemName) return;
-    const keepSpec = specOptions(v).some((x) => nameKey(x) === nameKey(l.spec));
+    const keepSpec = !!l.spec && specOk(v, l.spec);
     setLine(key, { itemName: v, ...(keepSpec ? {} : { spec: '' }), ...resetAuto(l) });
     autoPrice(key);
   };
   const pickSpec = (key: string, item: string, v: string) => {
     const l = d.lines.find((x) => x.key === key);
     if (!l || v === l.spec) return;
-    const us = specUnit.units.get(`${nameKey(item)}|${nameKey(v)}`);
+    const us = unitsOf(item, v);
     setLine(key, { spec: v, ...(us?.size === 1 ? { unit: [...us][0] } : {}), ...resetAuto(l) });
     autoPrice(key);
   };
   /** 목록에 없는 품명·규격 줄 (엑셀·붙여넣기로 들어온 줄) */
   const invalidLine = (l: ReqLine) =>
-    !!l.itemName.trim() && (!itemSet.has(nameKey(l.itemName)) || (!!l.spec.trim() && !specOptions(l.itemName).some((x) => nameKey(x) === nameKey(l.spec))));
+    !!l.itemName.trim() && (!itemSet.has(normItem(l.itemName)) || (!!l.spec.trim() && !specOk(l.itemName, l.spec)));
 
   const total = d.lines.reduce((a, l) => a + lineAmount(l), 0);
 
@@ -659,7 +682,7 @@ export default function ReqEdit() {
                             className="w-full"
                             value={l.itemName}
                             options={itemOptions}
-                            invalid={!!l.itemName && !itemSet.has(nameKey(l.itemName))}
+                            invalid={!!l.itemName && !itemSet.has(normItem(l.itemName))}
                             placeholder="품명 선택 ▾"
                             onPick={(v) => pickItem(l.key, v)}
                           />
@@ -673,7 +696,7 @@ export default function ReqEdit() {
                             className="w-full"
                             value={l.spec}
                             options={specOptions(l.itemName)}
-                            invalid={!!l.spec && !specOptions(l.itemName).some((x) => nameKey(x) === nameKey(l.spec))}
+                            invalid={!!l.spec && !specOk(l.itemName, l.spec)}
                             placeholder={l.itemName ? '규격 ▾' : '품명 먼저'}
                             onPick={(v) => pickSpec(l.key, l.itemName, v)}
                           />
@@ -875,6 +898,10 @@ export default function ReqEdit() {
             const l = d.lines.find((x) => x.key === priceFor)!;
             const cands = findPrices(prices.rows, l.itemName, l.spec);
             const last = lastOrderPrice(reqs.data, l.itemName, l.spec);
+            const ci = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`);
+            const invRows: { label: string; lp: LastPrice }[] = [];
+            if (ci?.site[d.siteId]) invRows.push({ label: '이 현장 최신', lp: ci.site[d.siteId] });
+            if (ci && (!ci.site[d.siteId] || ci.site[d.siteId].p !== ci.last.p || ci.site[d.siteId].m !== ci.last.m)) invRows.push({ label: '회사 전체 최신', lp: ci.last });
             const choose = (patch: Partial<ReqLine>) => {
               setLine(l.key, patch);
               setPriceFor(null);
@@ -884,7 +911,41 @@ export default function ReqEdit() {
                 <div className="mb-2 font-medium">
                   {l.itemName} {l.spec}
                 </div>
-                {!cands.length && !last && <Empty>단가표와 직전 발주에 이 품목이 없습니다. 단가를 직접 입력하세요.</Empty>}
+                {!cands.length && !last && !invRows.length && <Empty>계산서·단가표·직전 발주에 이 품목이 없습니다. 단가를 직접 입력하세요.</Empty>}
+                {invRows.length > 0 && (
+                  <table className="tbl mb-3">
+                    <thead>
+                      <tr>
+                        <th>최신 계산서 단가</th>
+                        <th>월</th>
+                        <th>업체</th>
+                        <th className="num">단가</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invRows.map(({ label, lp }) => {
+                        const v = vendors.data.find((x) => x.id === lp.vid);
+                        return (
+                          <tr key={label}>
+                            <td>{label}</td>
+                            <td className="text-muted">
+                              {lp.m}
+                              {lp.d ? ` (${lp.d})` : ''}
+                            </td>
+                            <td>{lp.v}</td>
+                            <td className="num font-semibold">{won(lp.p)}</td>
+                            <td className="text-right">
+                              <button className="btn-dark h-7 text-[12px]" onClick={() => choose({ orderPrice: lp.p, priceSource: '계산서', ...(v ? { vendorId: v.id, vendorName: v.name } : {}) })}>
+                                적용
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
                 {cands.length > 0 && (
                   <table className="tbl mb-3">
                     <thead>

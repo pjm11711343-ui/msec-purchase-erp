@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import { rebuildCatalog, refreshCatalog, useItemCatalog } from '../lib/itemCatalog';
 import { orderBy } from 'firebase/firestore';
 import { useAuth } from '../auth/AuthContext';
 import { useCollection } from '../lib/db';
@@ -73,6 +74,28 @@ export default function ItemLedger() {
   const cats = useSiteCategories();
   const std = useStandardCategories();
   const alias = useItemAlias();
+  const catalog = useItemCatalog();
+  const [catBusy, setCatBusy] = useState(false);
+  // 계산서가 목록보다 새로우면 구매청구용 품명 목록을 뒤에서 다시 만든다
+  const newestInv = useMemo(() => Math.max(0, ...invoices.data.map((i) => Math.max(i.uploadedAt ?? 0, i.appliedAt ?? 0))), [invoices.data]);
+  useEffect(() => {
+    if (isOffice && catalog.ready && !invoices.loading && newestInv > catalog.at && !catBusy) {
+      setCatBusy(true);
+      rebuildCatalog().catch(() => undefined).finally(() => setCatBusy(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOffice, invoices.loading, newestInv, catalog.at]);
+  const remakeCatalog = async () => {
+    setCatBusy(true);
+    try {
+      const n = await rebuildCatalog();
+      toast(`구매청구 품명 목록을 새로 만들었습니다. (${n.toLocaleString()}개 품목·규격)`);
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setCatBusy(false);
+    }
+  };
 
   const [tab, setTabState] = useState<Tab>(LS.get('tab', 'dash'));
   const setTab = (t: Tab) => (setTabState(t), LS.set('tab', t));
@@ -142,6 +165,7 @@ export default function ItemLedger() {
     try {
       await saveItemAlias(next);
       toast(`${keys.length}개 품목을 합쳤습니다. (회사 공용)`);
+      refreshCatalog();
       setMerge(false);
       setSel(new Set());
     } catch (e) {
@@ -154,6 +178,7 @@ export default function ItemLedger() {
     try {
       await saveItemAlias(next);
       toast('분리했습니다.');
+      refreshCatalog();
       setDetail(null);
     } catch (e) {
       toast(errMsg(e), 'err');
@@ -170,7 +195,18 @@ export default function ItemLedger() {
 
   return (
     <div>
-      <PageHeader title="월별 품목" desc="계산서(거래명세서) 줄을 현장·분류·업체별로 나누고, 같은 품목·규격을 월별로 쌓아 봅니다. 계산서 메뉴에 올린 자료가 바로 반영됩니다." />
+      <PageHeader title="월별 품목" desc="계산서(거래명세서) 줄을 현장·분류·업체별로 나누고, 같은 품목·규격을 월별로 쌓아 봅니다. 계산서 메뉴에 올린 자료가 바로 반영됩니다."
+        actions={
+          isOffice && (
+            <div className="flex items-center gap-2 text-[12px] text-muted">
+              <span>구매청구 품명 목록 {catalog.items.length.toLocaleString()}개{catalog.at ? ` · ${new Date(catalog.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+              <button className="btn-ghost h-8 text-[12px]" disabled={catBusy} onClick={remakeCatalog}>
+                {catBusy ? '만드는 중…' : '품명 목록 새로 만들기'}
+              </button>
+            </div>
+          )
+        }
+      />
 
       <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
         {TABS.filter(([k]) => isOffice || (k !== 'import' && k !== 'gipyo')).map(([k, label]) => (

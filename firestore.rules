@@ -126,6 +126,11 @@ service cloud.firestore {
       allow read: if isOffice() || isExec();
       allow write: if isOffice();
     }
+    // 구매청구 품명 목록(계산서에서 뽑은 품명·규격·최신 단가): ERP 사용자 모두 읽기
+    match /erp_itemCatalog/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
     match /erp_auditLogs/{id} {
       allow create: if isErp() && request.resource.data.uid == request.auth.uid;
       allow read: if isAdmin();

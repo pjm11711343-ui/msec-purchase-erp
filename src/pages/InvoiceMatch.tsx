@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { refreshCatalog } from '../lib/itemCatalog';
 import { Link, useParams } from 'react-router-dom';
 import { documentId, where } from 'firebase/firestore';
 import { useAuth } from '../auth/AuthContext';
@@ -73,6 +74,7 @@ export default function InvoiceMatch() {
       toast(apply ? '투입원장에 반영했습니다.' : '저장했습니다. 투입원장도 다시 계산했습니다.');
       setLines(null);
       setPicked(new Set());
+      refreshCatalog();
     } catch (e) {
       toast(errMsg(e), 'err');
     } finally {
