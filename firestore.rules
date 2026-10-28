@@ -94,7 +94,7 @@ service cloud.firestore {
     match /erp_requisitions/{id} {
       allow read: if canRead(resource.data.siteId);
       allow create: if hasSite(request.resource.data.siteId) && request.resource.data.createdBy == request.auth.uid;
-      allow update: if (hasSite(resource.data.siteId) || (isExec() && resource.data.currentApproverId == request.auth.uid))
+      allow update: if (hasSite(resource.data.siteId) || (isExec() && (resource.data.currentApproverId == request.auth.uid || request.auth.uid in resource.data.get('approverIds', []))))
         && request.resource.data.siteId == resource.data.siteId;
       allow delete: if isOffice() || (resource.data.createdBy == request.auth.uid && resource.data.status in ['draft', 'rejected']);
     }

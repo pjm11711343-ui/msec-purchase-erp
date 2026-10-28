@@ -190,7 +190,7 @@ export interface ApprovalStepState {
   label: string;
   userId?: string;
   userName?: string;
-  result?: 'approved' | 'rejected';
+  result?: 'approved' | 'rejected' | 'skipped'; // skipped = 결재자 미지정으로 건너뜀
   comment?: string;
   at?: number;
 }
@@ -207,6 +207,7 @@ export interface Requisition {
   steps: ApprovalStepState[];
   currentStep: number; // pending일 때 결재할 단계 index
   currentApproverId?: string; // 결재함 조회용
+  approverIds?: string[]; // 결재선에 지정된 사람 (전결 권한 확인용)
   lines: ReqLine[];
   totalAmount: number;
   createdBy: string;

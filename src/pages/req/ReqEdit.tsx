@@ -11,7 +11,7 @@ import { lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, use
 import { exportReq, parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
-import { isMyTurn, StatusChip } from './ReqList';
+import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
@@ -237,19 +237,31 @@ export default function ReqEdit() {
     if (bad) return toast(`"${bad.itemName}"의 금회청구 수량을 입력하세요.`, 'err');
     const wrong = d.lines.filter(invalidLine);
     if (wrong.length) return toast(`목록에 없는 품명·규격이 ${wrong.length}줄 있습니다 (빨간 칸). 목록에서 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
-    const miss = d.steps.findIndex((s) => !s.userId);
-    if (miss >= 0) return toast(`결재선 ${miss + 1}번째(${d.steps[miss].label}) 결재자를 지정하세요.`, 'err');
-    const steps = d.steps.map((s) => ({ label: s.label, userId: s.userId, userName: s.userName }));
-    save({ status: 'pending', steps, currentStep: 0, currentApproverId: steps[0].userId, submittedAt: Date.now() }, '결재 요청', '결재를 올렸습니다.');
+    // 결재자 미지정 칸은 건너뜀
+    const steps: ApprovalStepState[] = d.steps.map((s) => (s.userId ? { label: s.label, userId: s.userId, userName: s.userName } : { label: s.label, result: 'skipped' }));
+    const first = nextActive(steps, 0);
+    if (first < 0) return toast('결재선에 결재자를 한 명 이상 지정하세요.', 'err');
+    save({ status: 'pending', steps, currentStep: first, currentApproverId: steps[first].userId, approverIds: steps.filter((s) => s.userId).map((s) => s.userId!), submittedAt: Date.now() }, '결재 요청', '결재를 올렸습니다.');
   };
 
   const decide = (result: 'approved' | 'rejected') => {
     if (result === 'rejected' && !comment.trim()) return toast('반려 사유를 적어 주세요.', 'err');
-    const steps = d.steps.map((s, i) => (i === d.currentStep ? { ...s, result, comment: comment || undefined, at: Date.now(), userName: s.userName ?? profile?.name } : s));
+    const j = myDecideStep(d as Requisition, profile?.id, can('admin'));
+    if (j < 0) return toast('지금 결재할 차례가 아닙니다.', 'err');
+    const now = Date.now();
+    const me = d.steps[j];
+    const ceo = result === 'approved' && isCeo(me.label);
+    // 전결: 내 칸보다 앞의 미결 칸(대표면 뒤의 칸까지)은 내 이름으로 전결 처리
+    const steps: ApprovalStepState[] = d.steps.map((s, i) => {
+      if (i === j) return { ...s, result, comment: comment || undefined, at: now, userName: s.userName ?? profile?.name };
+      if (result !== 'approved' || s.result) return s;
+      if (i < j || ceo) return s.userId ? { ...s, result: 'approved', comment: `${me.label} 전결`, at: now } : { ...s, result: 'skipped' };
+      return s;
+    });
     if (result === 'rejected') return save({ status: 'rejected', steps, currentApproverId: undefined }, '반려', '반려했습니다.');
-    const next = d.currentStep + 1;
-    if (next >= steps.length) return save({ status: 'approved', steps, currentApproverId: undefined, approvedAt: Date.now() }, '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.');
-    save({ steps, currentStep: next, currentApproverId: steps[next].userId }, `${steps[d.currentStep].label} 승인`, '승인했습니다.');
+    const next = ceo ? -1 : nextActive(steps, j + 1);
+    if (next < 0) return save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.');
+    save({ steps, currentStep: next, currentApproverId: steps[next].userId }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.');
   };
 
   const reopen = () =>
@@ -345,7 +357,7 @@ export default function ReqEdit() {
                 발주 결의 저장
               </button>
             )}
-            {d.status === 'pending' && d.createdBy === profile?.id && d.currentStep === 0 && !d.steps[0]?.result && (
+            {d.status === 'pending' && d.createdBy === profile?.id && !d.steps.some((s) => s.result === 'approved' || s.result === 'rejected') && (
               <button className="btn-ghost" disabled={busy} onClick={reopen}>
                 결재 회수
               </button>
@@ -418,11 +430,11 @@ export default function ReqEdit() {
             {d.steps.map((s, i) => (
               <div
                 key={i}
-                className={`rounded-lg border px-2 py-1.5 ${s.result === 'approved' ? 'border-emerald-300 bg-emerald-50' : s.result === 'rejected' ? 'border-red-300 bg-red-50' : d.status === 'pending' && i === d.currentStep ? 'border-amber-brand bg-amber-soft' : 'border-line'}`}
+                className={`rounded-lg border px-2 py-1.5 ${s.result === 'skipped' ? 'border-dashed border-line opacity-60' : s.result === 'approved' ? 'border-emerald-300 bg-emerald-50' : s.result === 'rejected' ? 'border-red-300 bg-red-50' : d.status === 'pending' && i === d.currentStep ? 'border-amber-brand bg-amber-soft' : 'border-line'}`}
               >
                 <div className="text-[11px] text-muted">
                   {i + 1}. {s.label}
-                  {s.result && ` · ${s.result === 'approved' ? '승인' : '반려'} ${s.at ? new Date(s.at).toLocaleDateString('ko-KR') : ''}`}
+                  {s.result === 'skipped' ? ' · 미지정(건너뜀)' : s.result && ` · ${s.result === 'approved' ? '승인' : '반려'} ${s.at ? new Date(s.at).toLocaleDateString('ko-KR') : ''}`}
                 </div>
                 {editable ? (
                   <select
@@ -433,7 +445,7 @@ export default function ReqEdit() {
                       setD({ ...d, steps: d.steps.map((x, j) => (j === i ? { ...x, userId: u?.id, userName: u?.name } : x)) });
                     }}
                   >
-                    <option value="">결재자 선택</option>
+                    <option value="">미지정 (건너뜀)</option>
                     {users.data
                       .filter((u) => u.active)
                       .map((u) => (
@@ -443,7 +455,7 @@ export default function ReqEdit() {
                       ))}
                   </select>
                 ) : (
-                  <div className="font-medium">{s.userName ?? '-'}</div>
+                  <div className="font-medium">{s.userName ?? (s.result === 'skipped' || !s.userId ? '미지정' : '-')}</div>
                 )}
                 {s.comment && <div className="mt-0.5 text-[11.5px] text-muted">“{s.comment}”</div>}
               </div>
@@ -454,7 +466,12 @@ export default function ReqEdit() {
               <input className="input" placeholder="의견 (반려 시 필수)" value={comment} onChange={(e) => setComment(e.target.value)} />
               <div className="flex gap-2">
                 <button className="btn-primary flex-1" disabled={busy} onClick={() => decide('approved')}>
-                  {d.currentStep + 1 >= d.steps.length ? '최종 승인' : '승인'}
+                  {(() => {
+                  const j = myDecideStep(d as Requisition, profile?.id, can('admin'));
+                  if (j >= 0 && isCeo(d.steps[j].label)) return '최종 승인 (대표)';
+                  if (j > d.currentStep) return `전결 승인 (${d.steps[j].label})`;
+                  return nextActive(d.steps, j + 1) < 0 ? '최종 승인' : '승인';
+                })()}
                 </button>
                 <button className="btn-danger flex-1" disabled={busy} onClick={() => decide('rejected')}>
                   반려

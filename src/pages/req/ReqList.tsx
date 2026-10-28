@@ -18,8 +18,32 @@ export function StatusChip({ s }: { s: ReqStatus }) {
   return <span className={`chip ${STATUS_COLOR[s]}`}>{REQ_STATUS_LABEL[s]}</span>;
 }
 
+/** 현장 소장 칸: 승인하면 앞쪽 현장 결재가 끝난 것으로 본다 */
+export const isSiteHead = (label: string) => /소장/.test(label);
+/** 대표 칸: 승인하면 문서가 바로 최종 승인 */
+export const isCeo = (label: string) => /대표/.test(label);
+
+/** from 이후 결재자가 지정돼 있고 아직 결과가 없는 첫 칸 (-1 = 없음) */
+export function nextActive(steps: Requisition['steps'], from: number): number {
+  for (let i = from; i < steps.length; i++) if (steps[i].userId && !steps[i].result) return i;
+  return -1;
+}
+
+/** 내가 지금 결재할 수 있는 칸 (-1 = 없음). 내 차례이거나, 뒤쪽 소장·대표 칸이 나라면 전결 */
+export function myDecideStep(r: Requisition, uid?: string, isAdmin?: boolean): number {
+  if (r.status !== 'pending' || !uid) return -1;
+  const cur = r.currentStep;
+  if (r.steps[cur]?.userId === uid) return cur;
+  if (isAdmin && !r.steps[cur]?.userId) return cur;
+  for (let j = cur + 1; j < r.steps.length; j++) {
+    const s = r.steps[j];
+    if (s.userId === uid && !s.result && (isSiteHead(s.label) || isCeo(s.label))) return j;
+  }
+  return -1;
+}
+
 export function isMyTurn(r: Requisition, uid?: string, isAdmin?: boolean) {
-  return r.status === 'pending' && (r.currentApproverId === uid || (isAdmin && !r.steps[r.currentStep]?.userId));
+  return myDecideStep(r, uid, isAdmin) >= 0;
 }
 
 export default function ReqList() {
