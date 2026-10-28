@@ -11,7 +11,7 @@ import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../.
 import { lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
 import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
-import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
+import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
@@ -385,7 +385,7 @@ export default function ReqEdit() {
   };
   const N = (key: string, field: keyof ReqLine, v: number, on: boolean | undefined, w = 'w-20') =>
     on ? (
-      <input className={`input h-7 ${w} px-1.5 text-right`} value={v || ''} onChange={(e) => setLine(key, { [field]: num(e.target.value) } as Partial<ReqLine>)} />
+      <NumInput className={`input h-7 ${w} px-1.5 text-right`} value={v} onChange={(n) => setLine(key, { [field]: n } as Partial<ReqLine>)} />
     ) : (
       <span className="tabular-nums">{v ? v.toLocaleString() : ''}</span>
     );

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export function PageHeader({ title, desc, actions }: { title: string; desc?: string; actions?: ReactNode }) {
   return (
@@ -139,4 +139,39 @@ export function errMsg(e: unknown): string {
   if (m.includes('email-already-in-use')) return '이미 등록된 아이디(이메일)입니다.';
   if (m.includes('weak-password')) return '비밀번호는 6자 이상이어야 합니다.';
   return (e as Error)?.message ?? m;
+}
+
+/** 입력 중 글자에 천 단위 쉼표 넣기 (소수점·빼기 유지) */
+export function commaText(t: string): string {
+  const neg = t.trim().startsWith('-');
+  const s = t.replace(/[^\d.]/g, '');
+  const dot = s.indexOf('.');
+  const int = (dot >= 0 ? s.slice(0, dot) : s).replace(/^0+(?=\d)/, '');
+  const dec = dot >= 0 ? '.' + s.slice(dot + 1).replace(/\./g, '') : '';
+  return (neg ? '-' : '') + int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + dec;
+}
+
+/** 숫자 입력칸: 1,000 단위 쉼표로 보이고 값은 숫자로 넘긴다 */
+export function NumInput({ value, onChange, className = '', placeholder }: { value: number; onChange: (n: number) => void; className?: string; placeholder?: string }) {
+  const [text, setText] = useState(value ? commaText(String(value)) : '');
+  const [focus, setFocus] = useState(false);
+  useEffect(() => {
+    if (!focus) setText(value ? commaText(String(value)) : '');
+  }, [value, focus]);
+  return (
+    <input
+      className={className}
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={text}
+      onFocus={() => setFocus(true)}
+      onBlur={() => setFocus(false)}
+      onChange={(e) => {
+        const t = commaText(e.target.value);
+        setText(t);
+        const n = Number(t.replace(/,/g, ''));
+        onChange(Number.isFinite(n) ? n : 0);
+      }}
+    />
+  );
 }

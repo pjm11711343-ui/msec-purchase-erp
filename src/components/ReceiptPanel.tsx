@@ -4,7 +4,7 @@ import { audit, commitBatch, newId } from '../lib/db';
 import { C } from '../lib/firebase';
 import { num } from '../lib/normalize';
 import { poLineKey, today } from '../lib/receipts';
-import { errMsg, useToast } from './ui';
+import { commaText, errMsg, useToast } from './ui';
 import type { PurchaseOrder, Receipt } from '../types';
 
 /** 발주서 한 장의 입고 입력 + 입고 기록 */
@@ -156,9 +156,9 @@ export default function ReceiptPanel({ po, receipts }: { po: PurchaseOrder; rece
                 {r.remain > 0 && !readOnly && (
                   <input
                     className="input h-7 w-20 px-1.5 text-right"
-                    value={qty[r.k] ?? String(r.remain)}
+                    value={qty[r.k] ?? commaText(String(r.remain))}
                     onChange={(e) => {
-                      setQty((q) => ({ ...q, [r.k]: e.target.value }));
+                      setQty((q) => ({ ...q, [r.k]: commaText(e.target.value) }));
                       setPick((s) => new Set(s).add(r.k));
                     }}
                   />
