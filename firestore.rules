@@ -121,6 +121,11 @@ service cloud.firestore {
       allow read: if (erpSignedIn() && request.auth.uid == uid) || isOffice();
       allow write: if isAdmin();
     }
+    // 월별 품목: 품목 합치기(itemAlias), 집계표 금액(gipyo)
+    match /erp_ledgerMeta/{id} {
+      allow read: if isOffice() || isExec();
+      allow write: if isOffice();
+    }
     match /erp_auditLogs/{id} {
       allow create: if isErp() && request.resource.data.uid == request.auth.uid;
       allow read: if isAdmin();

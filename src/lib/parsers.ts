@@ -182,12 +182,25 @@ export function parseRequisitionWorkbook(wb: XLSX.WorkBook, fileName: string): P
 
 /* ───────────────────────── 월 계산서정리 파일 ───────────────────────── */
 
+export interface AllocEntry {
+  n: number; // 계산서 번호 (총합계 N)
+  name: string; // 표에 적힌 현장명 (갑지에 이름이 있으면 그 이름)
+  amt: number | null; // 그 계산서 금액
+  got: number; // 품목 합계
+  count: number; // 품목 줄 수
+}
+
 export interface ParsedInvoiceSheet {
   sheetName: string;
   siteLabel: string; // 시트 3행의 (현장명) 표기
   lines: InvoiceLine[];
   total: number;
   categories: { text: string; amount: number; count: number }[];
+  want?: number | null; // 시트 아래 '총합계 | 공급가액' 금액
+  zeroSkipped?: number; // 계산서 금액 0원 묶음이라 뺀 줄 수
+  isSafe?: boolean; // 본사(안전) 시트
+  alloc?: AllocEntry[]; // 본사(안전) → 현장 배분 표
+  lineAlloc?: (number | undefined)[]; // 줄마다 배분 계산서 번호
 }
 
 export interface ParsedInvoiceFile {
@@ -219,6 +232,155 @@ const HEADER_KEYS: Record<string, string> = {
   분류: 'categoryText',
   공정: 'process',
 };
+
+/* ───── 계산서정리 보조 규칙 (예전 '계산서 월별 품목 관리'와 같은 규칙) ───── */
+const TOTAL_RE = /^(총합계|총계|합계\(공급가액\)|계\(공급가액\))$/;
+const SKIP_RE = /^(합계|소계|총계|계|누계|월계|합|총합계|공급가액합계|[<[(]?(소|합|총)계.*)$/;
+const LEAD_SYM = /^[\s★☆✩✪✦✧※＊*·∙•◦‣▶▷►▸◆◇■□▪▫●○◎△▲▽▼.]+/;
+
+/** 시트 아래 '총합계 | 공급가액 | 금액' = 그 시트(현장) 계산서 금액 */
+function supplyTotal(all: Row[]): number | null {
+  let v: number | null = null;
+  for (const row of all)
+    for (let c = 0; c < row.length - 2; c++)
+      if (typeof row[c] === 'string' && (row[c] as string).replace(/\s/g, '') === '총합계' && typeof row[c + 1] === 'string' && /공급가액$/.test((row[c + 1] as string).replace(/\s/g, '')))
+        for (let k = c + 2; k < Math.min(row.length, c + 5); k++)
+          if (row[k] != null && row[k] !== '') {
+            v = num(row[k]);
+            break;
+          }
+  return v;
+}
+
+/** '총합계 N | 금액' 줄로 나뉘는 계산서 묶음 중 금액이 0원인 묶음의 줄 번호 */
+function zeroSections(all: Row[], hIdx: number): Set<number> {
+  const z = new Set<number>();
+  let start = hIdx + 1;
+  for (let r = hIdx + 1; r < all.length; r++) {
+    const row = all[r] ?? [];
+    let isTot = false;
+    let amt = 0;
+    for (let c = 0; c < row.length - 1; c++)
+      if (typeof row[c] === 'string' && (row[c] as string).replace(/\s/g, '') === '총합계') {
+        const nx = row[c + 1];
+        if (typeof nx === 'number' || /^\d+$/.test(String(nx ?? '').trim())) {
+          isTot = true;
+          amt = num(row[c + 2]);
+        }
+      }
+    if (isTot) {
+      if (!amt) for (let k = start; k < r; k++) z.add(k);
+      start = r + 1;
+    }
+  }
+  return z;
+}
+
+/** 본사(안전) 시트: '총합계 N | 금액 | 현장명' 표로 품목을 현장별로 나눈다 */
+function detectAlloc(wb: XLSX.WorkBook, sn: string, all: Row[], hIdx: number, col: Record<string, number>, r0: number, siteLabel: string): { tbl: { n: number; name: string; r: number; amt: number | null }[]; inv: Record<number, number> } | null {
+  const tbl: { n: number; name: string; r: number; amt: number | null }[] = [];
+  for (let r = hIdx + 1; r < all.length; r++) {
+    const row = all[r] ?? [];
+    const i = row.findIndex((v) => typeof v === 'string' && TOTAL_RE.test(v.replace(/\s/g, '')));
+    if (i < 0) continue;
+    const nv = row[i + 1];
+    const n = typeof nv === 'number' ? nv : /^\d+$/.test(String(nv ?? '').trim()) ? +String(nv).trim() : NaN;
+    if (!(n >= 1 && n <= 99) || Math.round(n) !== n) continue;
+    const nm = row.find(
+      (v, j) => j !== i && typeof v === 'string' && clean(v) && !/계산서|발행|총합계|공급가액|합계/.test(v.replace(/\s/g, '')) && !/^\s*\d{2,4}\s*[년.\-/]\s*\d{1,2}|\d{1,2}\s*월\s*\d{1,2}\s*일/.test(v),
+    ) as string | undefined;
+    if (nm && !tbl.some((t) => t.n === n)) tbl.push({ n, name: clean(nm), r, amt: row[i + 2] == null || row[i + 2] === '' ? null : num(row[i + 2]) });
+  }
+  if (!tbl.length) return null;
+  if (tbl.every((t) => nameKey(t.name) === nameKey(siteLabel))) return null;
+  const isTot = (row: Row) => row.some((v) => typeof v === 'string' && TOTAL_RE.test(v.replace(/\s/g, '')));
+  const isData = (row: Row) => !isTot(row) && clean(String(row[col.itemName] ?? '')) && (num(row[col.qty]) || num(row[col.finalAmount ?? col.amount]));
+  const firstT = Math.min(...tbl.map((t) => t.r));
+  let sect = false;
+  for (let r = firstT + 1; r < all.length; r++)
+    if (isData(all[r] ?? [])) {
+      sect = true;
+      break;
+    }
+  if (!sect && tbl.length === 1)
+    for (let r = hIdx + 1; r < firstT; r++)
+      if (isData(all[r] ?? [])) {
+        sect = true;
+        break;
+      }
+  const inv: Record<number, number> = {};
+  if (sect) {
+    // ① 계산서(페이지)마다: 품목들 → '총합계 N | 현장명' → 그 위 품목 = 그 현장
+    let pend: number[] = [];
+    for (let r = hIdx + 1; r < all.length; r++) {
+      const t = tbl.find((x) => x.r === r);
+      if (t) {
+        for (const pr of pend) inv[pr + r0] = t.n;
+        pend = [];
+      } else if (isData(all[r] ?? [])) pend.push(r);
+    }
+    return { tbl, inv };
+  }
+  // ② 맨 아래 모인 표: 원본 시트(이름에서 '(거래명세서)'를 뺀 시트)의 '계산서' 번호 열로 나눈다
+  if (new Set(tbl.map((t) => nameKey(t.name))).size < 2) return null;
+  const baseName = clean(sn.replace(/[(（]\s*거래\s*명세서?\s*[)）]/g, ' '));
+  const src = wb.SheetNames.find((n) => n !== sn && !n.includes('거래명세') && (clean(n) === baseName || nameKey(n) === nameKey(baseName)));
+  if (!src) return null;
+  const ws = wb.Sheets[src];
+  if (!ws?.['!ref']) return null;
+  const s0 = XLSX.utils.decode_range(ws['!ref']).s.r;
+  const aoa = rows(ws);
+  let hr = -1;
+  let ci = -1;
+  for (let r = 0; r < Math.min(aoa.length, 20) && ci < 0; r++) {
+    const row = aoa[r] ?? [];
+    const j = row.findIndex((v) => typeof v === 'string' && v.replace(/\s/g, '') === '계산서');
+    if (j >= 0 && row.some((v) => typeof v === 'string' && /품\s*명/.test(v))) {
+      hr = r;
+      ci = j;
+    }
+  }
+  if (ci < 0) return null;
+  for (let r = hr + 1; r < aoa.length; r++) {
+    const v = (aoa[r] ?? [])[ci];
+    if (typeof v === 'number') inv[r + s0] = v;
+  }
+  return { tbl, inv };
+}
+
+/** 갑지의 '본사안전' 계산서 목록: (번호) → 현장명·금액 */
+function gapjiAllocNames(wb: XLSX.WorkBook): Record<number, { name: string; amt: number | null }> {
+  const sn = wb.SheetNames.find((n) => /갑지/.test(n));
+  if (!sn) return {};
+  const aoa = rows(wb.Sheets[sn]);
+  let ac = -1;
+  for (const row of aoa) {
+    const c = row.map((v) => (typeof v === 'string' ? v.replace(/\s/g, '') : v));
+    const i = c.indexOf('공급가액');
+    const j = c.indexOf('세액');
+    if (i >= 0 && j > i) {
+      ac = i;
+      break;
+    }
+  }
+  const out: Record<number, { name: string; amt: number | null }> = {};
+  let on = false;
+  for (const row of aoa) {
+    const cells = row.map((v) => (typeof v === 'string' ? clean(v) : v));
+    if (!on) {
+      if (cells.some((v) => typeof v === 'string' && /본사\s*안전/.test(v) && !/하자/.test(v))) on = true;
+      else continue;
+    }
+    if (cells.some((v) => typeof v === 'string' && /소\s*계|총\s*합\s*계/.test(v))) break;
+    const ni = cells.findIndex((v) => typeof v === 'string' && /^\(\d+\)$/.test(v));
+    if (ni < 0) continue;
+    const n = +(cells[ni] as string).slice(1, -1);
+    const nm = [...cells].reverse().find((v) => typeof v === 'string' && v && !/^\(\d+\)$|공급가액|계산서\s*\d*\s*발행|본사\s*안전$/.test(v)) as string | undefined;
+    const amt = ac >= 0 ? num(row[ac]) : null;
+    if (nm && (!out[n] || (!out[n].amt && amt))) out[n] = { name: nm, amt };
+  }
+  return out;
+}
 
 export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): ParsedInvoiceFile {
   const warnings: string[] = [];
@@ -255,9 +417,11 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
   const year = month ? Number(month.slice(0, 4)) : undefined;
 
   const sheets: ParsedInvoiceSheet[] = [];
+  const gapji = gapjiAllocNames(wb);
   for (const sn of stmtSheets) {
     const ws = wb.Sheets[sn];
     const all = rows(ws);
+    const r0 = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).s.r : 0;
     const hIdx = all.slice(0, 12).findIndex((r) => r.some((v) => nameKey(v) === '품명'));
     if (hIdx < 0) continue;
     const header = all[hIdx];
@@ -275,20 +439,43 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
     const labelRow = all[2] ?? [];
     const labelCell = String(labelRow.find((v) => /^\s*\(/.test(String(v ?? ''))) ?? '');
     const siteLabel = clean(labelCell.match(/\(([^)]*)\)/)?.[1] ?? labelCell);
+    const isSafe = /안전/.test(sn) || /안전/.test(siteLabel);
+    const want = supplyTotal(all);
+    const zsec = zeroSections(all, hIdx);
+    const allocInfo = isSafe ? detectAlloc(wb, sn, all, hIdx, col, r0, siteLabel) : null;
+    const headItem = nameKey(header[col.itemName]);
 
     const get = (r: Row, k: string) => (col[k] === undefined ? null : r[col[k]]);
     const lines: InvoiceLine[] = [];
-    for (const r of all.slice(hIdx + 1)) {
-      const item = clean(String(get(r, 'itemName') ?? ''));
+    const lineAlloc: (number | undefined)[] = [];
+    let zeroSkipped = 0;
+    for (let ri = hIdx + 1; ri < all.length; ri++) {
+      const r = all[ri] ?? [];
+      // 페이지가 나뉘어 중간에 총합계·머리글이 반복돼도 끝까지 읽는다
+      if (r.some((v) => typeof v === 'string' && TOTAL_RE.test(v.replace(/\s/g, '')))) {
+        group = '';
+        continue;
+      }
+      if (headItem && nameKey(get(r, 'itemName')) === headItem) {
+        group = '';
+        continue;
+      }
+      const item = clean(String(get(r, 'itemName') ?? '')).replace(LEAD_SYM, '');
       if (!item || item === '0') {
         group = '';
         continue;
       }
+      if (SKIP_RE.test(item.replace(/\s/g, ''))) continue;
       const pv = get(r, 'process');
       if (typeof pv === 'string' && clean(pv) && clean(pv) !== '0') group = clean(pv);
       const qty = num(get(r, 'qty'));
       const amount = num(get(r, 'amount'));
       if (!qty && !amount) continue;
+      // 계산서 금액이 0원이면(시트 전체 또는 그 묶음) 불러오지 않는다
+      if (want === 0 || zsec.has(ri)) {
+        zeroSkipped++;
+        continue;
+      }
       const chQ = get(r, 'changedQty');
       const chP = get(r, 'changedPrice');
       const chA = get(r, 'changedAmount');
@@ -308,7 +495,7 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
         negoRate: get(r, 'negoRate') == null ? undefined : num(get(r, 'negoRate')),
         orderDate: toDateStr(get(r, 'orderDate'), year),
         itemName: item,
-        spec: clean(String(get(r, 'spec') ?? '')),
+        spec: clean(String(get(r, 'spec') ?? '')).replace(LEAD_SYM, ''),
         unit: clean(String(get(r, 'unit') ?? '')),
         qty,
         unitPrice: num(get(r, 'unitPrice')),
@@ -317,13 +504,15 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
         changedPrice: chP == null || chP === '' ? undefined : num(chP),
         changedAmount: hasChange ? num(chA) : undefined,
         finalAmount,
-        categoryText: clean(String(get(r, 'categoryText') ?? '').replace(/\n/g, ' ')),
+        // 본사(안전) 시트의 분류는 안전장비류
+        categoryText: isSafe ? '안전장비류' : clean(String(get(r, 'categoryText') ?? '').replace(/\n/g, ' ')),
         process: group || undefined,
         matchStatus: 'unmatched',
       };
       // undefined 필드는 Firestore 저장 시 오류가 나므로 제거
       Object.keys(line).forEach((k) => (line as unknown as Record<string, unknown>)[k] === undefined && delete (line as unknown as Record<string, unknown>)[k]);
       lines.push(line);
+      lineAlloc.push(allocInfo?.inv[ri + r0]);
     }
     if (!lines.length) continue;
     const catMap = new Map<string, { amount: number; count: number }>();
@@ -334,12 +523,26 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       c.count += 1;
       catMap.set(k, c);
     }
+    let alloc: AllocEntry[] | undefined;
+    if (allocInfo) {
+      alloc = allocInfo.tbl.map((t) => {
+        const g = gapji[t.n];
+        // 갑지 이름은 그 번호의 계산서 금액이 맞을 때만 쓴다 (번호가 밀려 적힌 경우 방지)
+        const name = g && nameKey(g.name) !== nameKey(t.name) && (g.amt == null || t.amt == null || Math.round(g.amt) === Math.round(t.amt)) ? g.name : t.name;
+        const mine = lines.filter((_, i) => lineAlloc[i] === t.n);
+        return { n: t.n, name, amt: t.amt, got: Math.round(mine.reduce((a, l) => a + l.finalAmount, 0)), count: mine.length };
+      });
+    }
     sheets.push({
       sheetName: sn,
       siteLabel,
       lines,
       total: lines.reduce((a, l) => a + l.finalAmount, 0),
       categories: [...catMap].map(([text, v]) => ({ text, ...v })),
+      want,
+      zeroSkipped,
+      isSafe,
+      ...(alloc ? { alloc, lineAlloc } : {}),
     });
   }
   if (!sheets.length) warnings.push('입력된 거래 내역이 있는 거래명세서 시트가 없습니다.');

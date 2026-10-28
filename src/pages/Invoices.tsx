@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { orderBy, where } from 'firebase/firestore';
 import { readWorkbook, parseInvoiceWorkbook, type ParsedInvoiceFile } from '../lib/parsers';
 import { audit, commitBatch, fetchWhere, newId, useCollection, useSettings } from '../lib/db';
@@ -20,6 +20,7 @@ interface SheetMap {
   siteId: string; // '' = 가져오지 않음
   catMap: Record<string, string>; // 분류 원문 → siteCategoryId ('' = 미분류)
   picked?: string[]; // 한꺼번에 지정하려고 체크한 원문
+  allocSites?: Record<number, string>; // 본사(안전) 배분: 계산서 번호 → ERP 현장 ('' = 시트 현장 그대로)
 }
 interface FileState {
   parsed: ParsedInvoiceFile;
@@ -82,7 +83,9 @@ export default function Invoices() {
             const siteId = guessSite(sites.data, s.sheetName, s.siteLabel);
             const catMap: Record<string, string> = {};
             s.categories.forEach((c) => (catMap[c.text] = siteId ? resolveCat(c.text, catsOf(siteId), std.data) : ''));
-            return { siteId, catMap };
+            const allocSites: Record<number, string> = {};
+            s.alloc?.forEach((a) => (allocSites[a.n] = guessSite(sites.data, a.name, a.name)));
+            return { siteId, catMap, ...(s.alloc ? { allocSites } : {}) };
           }),
         });
       } catch (e) {
@@ -140,12 +143,21 @@ export default function Invoices() {
 
         f.parsed.sheets.forEach((s, si) => {
           const m = f.sheets[si];
-          if (!m.siteId) return;
-          const invId = `${f.month}_${vendorId}_${m.siteId}`;
-          const lines: InvoiceLine[] = s.lines.map((l) => {
-            const cid = m.catMap[l.categoryText || NO_CAT];
-            return { ...l, ...(cid ? { siteCategoryId: cid } : {}), matchStatus: applied ? 'unmatched' : 'migrated' };
+          if (!m.siteId && !s.alloc) return;
+          // 줄마다 들어갈 현장: 본사(안전) 배분 줄은 배분 표에서 고른 현장, 나머지는 시트 현장
+          const bySite = new Map<string, InvoiceLine[]>();
+          s.lines.forEach((l, li) => {
+            const n = s.lineAlloc?.[li];
+            const to = (n != null && m.allocSites?.[n]) || m.siteId;
+            if (!to) return; // 현장을 고르지 않은 줄은 가져오지 않음
+            const moved = to !== m.siteId;
+            const text = l.categoryText || NO_CAT;
+            const cid = moved ? resolveCat(text, catsOf(to), std.data) : m.catMap[text];
+            const line: InvoiceLine = { ...l, ...(cid ? { siteCategoryId: cid } : {}), ...(moved ? { note: [`${s.siteLabel || s.sheetName} 배분`, l.note].filter(Boolean).join(' · ') } : {}), matchStatus: applied ? 'unmatched' : 'migrated' };
+            bySite.set(to, [...(bySite.get(to) ?? []), line]);
           });
+          for (const [siteId, lines] of bySite) {
+          const invId = `${f.month}_${vendorId}_${siteId}`;
           const prev = invoiceDocs.get(invId);
           const inv: Invoice = prev
             ? { ...prev, lines: [...prev.lines, ...lines], sheetName: `${prev.sheetName}, ${s.sheetName}` }
@@ -154,7 +166,7 @@ export default function Invoices() {
                 month: f.month,
                 vendorId,
                 vendorName,
-                siteId: m.siteId,
+                siteId,
                 sheetName: s.sheetName,
                 source: 'excel',
                 fileName: f.parsed.fileName,
@@ -174,6 +186,7 @@ export default function Invoices() {
             const agg = ledgerByInvoice.get(invId) ?? new Map<string, number>();
             for (const l of lines) if (l.siteCategoryId) agg.set(l.siteCategoryId, (agg.get(l.siteCategoryId) ?? 0) + l.finalAmount);
             ledgerByInvoice.set(invId, agg);
+          }
           }
           // 별칭 학습
           const sa = siteAlias.get(m.siteId) ?? new Set<string>();
@@ -354,10 +367,23 @@ export default function Invoices() {
                       update(fi, (x) => ({ ...x, sheets: x.sheets.map((y, j) => (j === si ? { ...y, ...patch } : y)) }));
                     const siteCats = catsOf(m.siteId);
                     return (
-                      <tr key={s.sheetName} className={m.siteId ? '' : 'opacity-60'}>
+                      <Fragment key={s.sheetName}>
+                      <tr className={m.siteId || s.alloc ? '' : 'opacity-60'}>
                         <td className="align-top">
                           <div className="font-medium">{s.sheetName}</div>
                           <div className="text-[11.5px] text-muted">{s.siteLabel}</div>
+                          {s.want != null && (
+                            <div className="mt-0.5">
+                              {Math.round(s.total - s.want) === 0 ? (
+                                <span className="chip bg-emerald-50 text-emerald-700">총합계 일치</span>
+                              ) : (
+                                <span className="chip bg-red-50 text-red-600" title={`시트 총합계 공급가액 ${won(s.want)}원`}>
+                                  총합계와 {won(Math.abs(s.total - s.want))}원 {s.total > s.want ? '많음' : '적음'}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {!!s.zeroSkipped && <div className="mt-0.5 text-[11px] text-muted">계산서 0원 묶음 {s.zeroSkipped}줄 제외</div>}
                         </td>
                         <td className="align-top">
                           <select
@@ -473,6 +499,52 @@ export default function Invoices() {
                           )}
                         </td>
                       </tr>
+                      {s.alloc && (
+                        <tr>
+                          <td colSpan={5} className="bg-amber-soft/40">
+                            <div className="mb-1 text-[12px] font-semibold">본사(안전) 현장 배분 — 계산서 번호별로 아래 현장에 나눠 넣습니다 (분류: 안전장비류)</div>
+                            <table className="tbl">
+                              <thead>
+                                <tr>
+                                  <th>계산서</th>
+                                  <th>표의 현장명</th>
+                                  <th className="num">계산서 금액</th>
+                                  <th className="num">품목 합계</th>
+                                  <th className="num">줄</th>
+                                  <th>ERP 현장</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {s.alloc.map((a) => (
+                                  <tr key={a.n}>
+                                    <td>({a.n})</td>
+                                    <td>{a.name}</td>
+                                    <td className="num">{a.amt == null ? '-' : won(a.amt)}</td>
+                                    <td className={`num ${a.amt != null && Math.round(a.amt) !== a.got ? 'font-semibold text-red-600' : ''}`}>{won(a.got)}</td>
+                                    <td className="num">{a.count}</td>
+                                    <td>
+                                      <select
+                                        className={`input h-7 w-48 ${m.allocSites?.[a.n] ? '' : 'border-amber-brand bg-amber-soft'}`}
+                                        value={m.allocSites?.[a.n] ?? ''}
+                                        onChange={(e) => setM({ allocSites: { ...(m.allocSites ?? {}), [a.n]: e.target.value } })}
+                                      >
+                                        <option value="">{m.siteId ? '시트 현장 그대로' : '가져오지 않음'}</option>
+                                        {sites.data.map((x) => (
+                                          <option key={x.id} value={x.id}>
+                                            {x.code} {x.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {s.lineAlloc && s.lineAlloc.some((n) => n == null) && <div className="mt-1 text-[11px] text-muted">번호가 없는 줄 {s.lineAlloc.filter((n) => n == null).length}개는 시트 현장으로 들어갑니다.</div>}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

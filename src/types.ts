@@ -106,6 +106,7 @@ export interface InvoiceLine {
   finalAmount: number; // 변경금액이 있으면 그 값, 없으면 금액
   categoryText: string; // 분류 원문
   process?: string; // 공정
+  note?: string; // 비고 (예: '본사(안전) 배분')
   siteCategoryId?: string; // 매핑 결과
   matchStatus: 'migrated' | 'unmatched' | 'matched' | 'manual';
   poId?: string; // 연결된 발주서
@@ -121,7 +122,7 @@ export interface Invoice {
   vendorName: string;
   siteId: string;
   sheetName: string;
-  source: 'excel' | 'portal';
+  source: 'excel' | 'portal' | 'import'; // import = 예전 '계산서 월별 품목 관리' 백업에서 옮긴 자료
   fileName: string;
   totalAmount: number;
   lineCount: number;
