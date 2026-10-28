@@ -508,27 +508,65 @@ export default function ReqEdit() {
         {!d.lines.length ? (
           <Empty>품목이 없습니다.</Empty>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="tbl">
+          <div>
+            <table className="tbl req-tbl w-full table-fixed text-[12px]">
+              <colgroup>
+                <col style={{ width: 26 }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '4.5%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '5.5%' }} />
+                <col style={{ width: '5.5%' }} />
+                <col style={{ width: '4.5%' }} />
+                <col style={{ width: '9.5%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '8.5%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '7.5%' }} />
+                <col style={{ width: '6.5%' }} />
+                <col style={{ width: 40 }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th className="w-6">#</th>
+                  <th>#</th>
                   <th>품명</th>
                   <th>규격</th>
                   <th>단위</th>
-                  <th className="num">계약수량</th>
-                  <th className="num">계약단가</th>
-                  <th className="num">실행량</th>
-                  <th className="num">기반입</th>
+                  <th className="num leading-tight">
+                    계약수량
+                    <br />
+                    계약단가
+                  </th>
+                  <th className="num leading-tight">
+                    실행량
+                    <br />
+                    기반입
+                  </th>
                   <th className="num">금회청구</th>
-                  <th className="num">실행잔여</th>
-                  <th>본/비고</th>
-                  <th>희망납기</th>
-                  <th>사용 위치·공정</th>
+                  <th className="num leading-tight">
+                    실행
+                    <br />
+                    잔여
+                  </th>
+                  <th className="leading-tight">
+                    희망납기
+                    <br />
+                    사용 위치·공정
+                  </th>
                   <th>자재분류</th>
-                  <th>비고</th>
+                  <th className="leading-tight">
+                    본/비고
+                    <br />
+                    비고
+                  </th>
                   <th className="bg-amber-soft">거래선</th>
-                  <th className="num bg-amber-soft">발주수량</th>
+                  <th className="num bg-amber-soft leading-tight">
+                    발주
+                    <br />
+                    수량
+                  </th>
                   <th className="num bg-amber-soft">단가</th>
                   <th className="num bg-amber-soft">금액</th>
                   <th>발주</th>
@@ -539,12 +577,12 @@ export default function ReqEdit() {
                   const pq = priorOf(l);
                   const remain = l.execQty ? l.execQty - pq - l.reqQty : null;
                   return (
-                    <tr key={l.key}>
-                      <td className="text-muted">{i + 1}</td>
+                    <tr key={l.key} className="align-top">
+                      <td className="pt-2 text-muted">{i + 1}</td>
                       <td>
                         {editable ? (
                           <PickInput
-                            className="w-44"
+                            className="w-full"
                             value={l.itemName}
                             options={itemOptions}
                             invalid={!!l.itemName && !itemSet.has(nameKey(l.itemName))}
@@ -552,25 +590,25 @@ export default function ReqEdit() {
                             onPick={(v) => pickItem(l.key, v)}
                           />
                         ) : (
-                          <span>{l.itemName}</span>
+                          <span className="break-words">{l.itemName}</span>
                         )}
                       </td>
                       <td>
                         {editable ? (
                           <PickInput
-                            className="w-28"
+                            className="w-full"
                             value={l.spec}
                             options={specOptions(l.itemName)}
                             invalid={!!l.spec && !specOptions(l.itemName).some((x) => nameKey(x) === nameKey(l.spec))}
-                            placeholder={l.itemName ? '규격 선택 ▾' : '품명 먼저'}
+                            placeholder={l.itemName ? '규격 ▾' : '품명 먼저'}
                             onPick={(v) => pickSpec(l.key, l.itemName, v)}
                           />
                         ) : (
-                          <span>{l.spec}</span>
+                          <span className="break-words">{l.spec}</span>
                         )}
                       </td>
                       <td>
-                        {T(l.key, 'unit', l.unit, editable, 'w-16', { list: `unit-${l.key}` })}
+                        {T(l.key, 'unit', l.unit, editable, 'w-full', { list: `unit-${l.key}` })}
                         {editable && (
                           <datalist id={`unit-${l.key}`}>
                             {unitOptions(l.itemName, l.spec).map((x) => (
@@ -579,20 +617,35 @@ export default function ReqEdit() {
                           </datalist>
                         )}
                       </td>
-                      <td className="num">{N(l.key, 'contractQty', l.contractQty, editable, 'w-16')}</td>
-                      <td className="num">{N(l.key, 'contractPrice', l.contractPrice, editable)}</td>
-                      <td className="num">{N(l.key, 'execQty', l.execQty, editable, 'w-16')}</td>
-                      <td className="num text-muted" title={l.priorQtyManual != null ? '엑셀에서 받은 값' : '이전 승인 청구 합계'}>
-                        {pq ? pq.toLocaleString() : ''}
+                      <td className="num">
+                        <div className="flex flex-col gap-0.5">
+                          {N(l.key, 'contractQty', l.contractQty, editable, 'w-full')}
+                          {N(l.key, 'contractPrice', l.contractPrice, editable, 'w-full')}
+                        </div>
                       </td>
-                      <td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, editable, 'w-16')}</td>
-                      <td className={`num ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}>{remain == null ? '' : remain.toLocaleString()}</td>
-                      <td>{T(l.key, 'note', l.note, editable, 'w-16')}</td>
-                      <td>{editable ? <input type="date" className="input h-7 w-32 px-1" value={l.dueDate ?? ''} onChange={(e) => setLine(l.key, { dueDate: e.target.value || undefined })} /> : l.dueDate}</td>
-                      <td>{T(l.key, 'location', l.location, editable, 'w-28')}</td>
+                      <td className="num">
+                        <div className="flex flex-col gap-0.5">
+                          {N(l.key, 'execQty', l.execQty, editable, 'w-full')}
+                          <span className="pr-1.5 text-muted" title={l.priorQtyManual != null ? '기반입: 엑셀에서 받은 값' : '기반입: 이전 승인 청구 합계'}>
+                            {pq ? pq.toLocaleString() : '-'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, editable, 'w-full')}</td>
+                      <td className={`num pt-2 ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}>{remain == null ? '' : remain.toLocaleString()}</td>
+                      <td>
+                        <div className="flex flex-col gap-0.5">
+                          {editable ? (
+                            <input type="date" className="input h-7 w-full px-1 text-[11.5px]" value={l.dueDate ?? ''} onChange={(e) => setLine(l.key, { dueDate: e.target.value || undefined })} />
+                          ) : (
+                            <span>{l.dueDate}</span>
+                          )}
+                          {T(l.key, 'location', l.location, editable, 'w-full', { placeholder: '사용 위치·공정' })}
+                        </div>
+                      </td>
                       <td>
                         {editable ? (
-                          <select className="input h-7 w-32 px-1" value={l.siteCategoryId ?? ''} onChange={(e) => setLine(l.key, { siteCategoryId: e.target.value || undefined })}>
+                          <select className="input h-7 w-full px-1" value={l.siteCategoryId ?? ''} onChange={(e) => setLine(l.key, { siteCategoryId: e.target.value || undefined })}>
                             <option value="">-</option>
                             {siteCats.map((c) => (
                               <option key={c.id} value={c.id}>
@@ -604,11 +657,16 @@ export default function ReqEdit() {
                           catName(l.siteCategoryId)
                         )}
                       </td>
-                      <td>{T(l.key, 'remark', l.remark, editable, 'w-32')}</td>
+                      <td>
+                        <div className="flex flex-col gap-0.5">
+                          {T(l.key, 'note', l.note, editable, 'w-full', { placeholder: '본/비고' })}
+                          {T(l.key, 'remark', l.remark, editable, 'w-full', { placeholder: '비고' })}
+                        </div>
+                      </td>
                       <td className="bg-amber-soft/40">
                         {orderEditable ? (
                           <select
-                            className="input h-7 w-32 px-1"
+                            className="input h-7 w-full px-1"
                             value={l.vendorId ?? ''}
                             onChange={(e) => {
                               const v = vendorOf(e.target.value);
@@ -625,26 +683,26 @@ export default function ReqEdit() {
                               ))}
                           </select>
                         ) : (
-                          l.vendorName
+                          <span className="break-words">{l.vendorName}</span>
                         )}
                       </td>
-                      <td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, orderEditable, 'w-16')}</td>
+                      <td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, orderEditable, 'w-full')}</td>
                       <td className="num bg-amber-soft/40">
-                        <div className="flex items-center justify-end gap-1">
-                          {N(l.key, 'orderPrice', l.orderPrice, orderEditable)}
-                          {l.priceSource && <span className="text-[10px] text-muted">{l.priceSource}</span>}
+                        <div className="flex items-center justify-end gap-0.5">
+                          {N(l.key, 'orderPrice', l.orderPrice, orderEditable, 'w-full min-w-0')}
                           {orderEditable && l.itemName && (
-                            <button className="text-[11px] text-amber-700 hover:underline" onClick={() => setPriceFor(l.key)} title="단가 후보 보기">
+                            <button className="shrink-0 text-[11px] text-amber-700 hover:underline" onClick={() => setPriceFor(l.key)} title="단가 후보 보기">
                               ▾
                             </button>
                           )}
                         </div>
+                        {l.priceSource && <div className="text-right text-[10px] text-muted">{l.priceSource}</div>}
                       </td>
-                      <td className="num bg-amber-soft/40">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
-                      <td className="whitespace-nowrap">
+                      <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
+                      <td className="pt-1.5">
                         {d.id && ordered.get(`${d.id}|${l.key}`) && (
-                          <Link to={`/po/${ordered.get(`${d.id}|${l.key}`)!.id}`} className="chip bg-emerald-50 text-emerald-700 hover:underline">
-                            {ordered.get(`${d.id}|${l.key}`)!.poNo}
+                          <Link to={`/po/${ordered.get(`${d.id}|${l.key}`)!.id}`} className="block truncate text-[10.5px] text-emerald-700 hover:underline" title={ordered.get(`${d.id}|${l.key}`)!.poNo}>
+                            {ordered.get(`${d.id}|${l.key}`)!.poNo.slice(-9)}
                           </Link>
                         )}
                         {editable && (
@@ -657,7 +715,7 @@ export default function ReqEdit() {
                   );
                 })}
                 <tr className="bg-[#f7f8fb] font-semibold">
-                  <td colSpan={18} className="text-right">
+                  <td colSpan={14} className="text-right">
                     합계
                   </td>
                   <td className="num">{won(d.lines.reduce((a, l) => a + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }), 0))}</td>

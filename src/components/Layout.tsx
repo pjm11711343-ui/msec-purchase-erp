@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL, type Role } from '../types';
 
@@ -51,6 +51,8 @@ const GROUPS: { title: string; items: Item[] }[] = [
 export default function Layout() {
   const { profile, logout } = useAuth();
   const role = profile?.role;
+  // 구매청구서 작성 화면은 열이 많아 화면 가로 전체를 쓴다
+  const wide = /^\/req\/./.test(useLocation().pathname);
   return (
     <div className="flex h-full">
       <aside className="flex w-[212px] shrink-0 flex-col bg-navy-950 text-white/80">
@@ -99,7 +101,7 @@ export default function Layout() {
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1480px] px-6 py-5">
+        <div className={`mx-auto px-6 py-5 ${wide ? 'max-w-none' : 'max-w-[1480px]'}`}>
           {new URLSearchParams(location.search).has('vendor') && (
             <div className="no-print mb-4 flex items-center justify-between rounded-2xl border border-amber-brand bg-amber-soft px-4 py-3">
               <span>

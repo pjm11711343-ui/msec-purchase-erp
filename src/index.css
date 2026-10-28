@@ -81,6 +81,18 @@ body {
   animation: fade-up 0.18s ease-out;
 }
 
+/* 구매청구서 품목표: 가로 스크롤 없이 화면 폭에 맞춤 */
+.req-tbl th,
+.req-tbl td {
+  @apply px-1 py-1;
+}
+.req-tbl th {
+  @apply whitespace-normal text-[11.5px];
+}
+.req-tbl .input {
+  @apply min-w-0 text-[12px];
+}
+
 /* 발주서 인쇄 / PDF 저장 */
 @media print {
   @page {
