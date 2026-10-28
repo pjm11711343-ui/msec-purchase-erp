@@ -281,6 +281,7 @@ export interface VendorAccount {
   vendorId: string;
   vendorName: string;
   code: string; // 업체코드 (로그인 아이디)
+  accessCode?: string; // 접속코드 (사내 관리자 화면에서 다시 보기용)
   active: boolean;
   issuedAt: number;
   issuedBy: string;

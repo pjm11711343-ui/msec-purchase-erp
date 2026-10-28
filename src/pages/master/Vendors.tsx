@@ -28,7 +28,7 @@ export default function Vendors() {
       const code = `V${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0')}`;
       const access = randomCode(8);
       const uid = await createAccount(vendorEmail(code), access);
-      const acc: Omit<VendorAccount, 'id'> = { vendorId: v.id, vendorName: v.name, code, active: true, issuedAt: Date.now(), issuedBy: profile?.name ?? '' };
+      const acc: Omit<VendorAccount, 'id'> = { vendorId: v.id, vendorName: v.name, code, accessCode: access, active: true, issuedAt: Date.now(), issuedBy: profile?.name ?? '' };
       await commitBatch([
         { type: 'set', col: C.vendorAccounts, id: uid, data: acc, merge: false },
         ...prev.map((a) => ({ type: 'set' as const, col: C.vendorAccounts, id: a.id, data: { active: false } })),
@@ -54,6 +54,18 @@ export default function Vendors() {
     aliases: toList(d.aliases),
     active: prev?.active ?? true,
   });
+  /** 업체에 보낼 안내 문구 복사 (PC 프로그램에서 발급해도 인터넷 주소로 안내) */
+  const copyGuide = async (code: string, access: string) => {
+    const origin = /localhost|127\.0\.0\.1/.test(location.hostname) ? 'https://msec-purchase-erp.vercel.app' : location.origin;
+    const text = `[명신기공 협력업체 포털]\n주소: ${origin}/?vendor\n업체코드: ${code}\n접속코드: ${access}\n\n로그인 화면에서 '협력업체'를 누르고 위 코드를 넣으세요. 발주 확인과 현장 입고일 입력을 이곳에서 해주세요.`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('안내 문구를 복사했습니다. 업체에 보내 주세요.');
+    } catch {
+      toast('복사에 실패했습니다. 직접 적어 주세요.', 'err');
+    }
+  };
+
   return (
     <div>
       <PageHeader title="업체" desc="발주·계산서를 주고받는 공급업체입니다. 이메일은 3단계 발주서 발송, 접속코드는 4단계 업체 포털에서 씁니다." />
@@ -73,7 +85,28 @@ export default function Vendors() {
             label: '업체 포털',
             render: (v) => {
               const a = accountOf(v.id);
-              return a ? <span className="chip bg-emerald-50 text-emerald-700">업체코드 {a.code}</span> : <span className="text-[12px] text-muted">미발급</span>;
+              if (!a) return <span className="text-[12px] text-muted">미발급</span>;
+              return (
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  <span className="chip bg-emerald-50 text-emerald-700">업체코드 {a.code}</span>
+                  {a.accessCode ? (
+                    <>
+                      <span className="chip bg-navy-950/5 font-mono text-navy-900">접속코드 {a.accessCode}</span>
+                      <button
+                        className="text-[11px] text-amber-700 hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyGuide(a.code, a.accessCode!);
+                        }}
+                      >
+                        안내 복사
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-muted" title="이 기능 전에 발급한 코드는 저장돼 있지 않습니다. 다시 보려면 재발급하세요.">접속코드 미보관(재발급 시 표시)</span>
+                  )}
+                </span>
+              );
             },
           },
         ]}
@@ -145,13 +178,7 @@ export default function Vendors() {
             className="btn-primary"
             onClick={async () => {
               if (!issued) return;
-              const text = `[명신기공 협력업체 포털]\n주소: ${location.origin}/?vendor\n업체코드: ${issued.code}\n접속코드: ${issued.access}\n\n로그인 화면에서 '협력업체'를 누르고 위 코드를 넣으세요. 발주 확인과 현장 입고일 입력을 이곳에서 해주세요.`;
-              try {
-                await navigator.clipboard.writeText(text);
-                toast('안내 문구를 복사했습니다. 업체에 보내 주세요.');
-              } catch {
-                toast('복사에 실패했습니다. 직접 적어 주세요.', 'err');
-              }
+              await copyGuide(issued.code, issued.access);
             }}
           >
             안내 문구 복사
@@ -172,7 +199,7 @@ export default function Vendors() {
               </div>
             </div>
             <p className="text-[12.5px] text-muted">
-              접속코드는 이 창을 닫으면 다시 볼 수 없습니다. 지금 업체에 전달하세요. 잃어버리면 다시 발급하면 되고, 그때 기존 코드는 막힙니다.
+              접속코드는 업체 목록의 "업체 포털" 칸에서 관리자(관리자·자재부)가 다시 볼 수 있습니다. 다시 발급하면 기존 코드는 막힙니다.
             </p>
           </div>
         )}
