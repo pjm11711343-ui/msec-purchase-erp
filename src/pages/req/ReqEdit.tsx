@@ -12,6 +12,7 @@ import { exportReq, parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
 import { isMyTurn, StatusChip } from './ReqList';
+import PickInput from '../../components/PickInput';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
 const TEMPLATES: Record<Requisition['approvalType'], string[]> = {
@@ -103,8 +104,9 @@ export default function ReqEdit() {
     const s = new Set<string>();
     prices.rows.forEach((p) => s.add(p.itemName));
     reqs.data.forEach((r) => r.lines.forEach((l) => l.itemName && s.add(l.itemName)));
-    return [...s].sort().slice(0, 3000);
+    return [...s].sort((a, b) => a.localeCompare(b, 'ko'));
   }, [prices.rows, reqs.data]);
+  const itemSet = useMemo(() => new Set(itemOptions.map(nameKey)), [itemOptions]);
   // 품명별 규격 / 품명·규격별 단위 목록 (단가표 + 지난 청구서)
   const specUnit = useMemo(() => {
     const specs = new Map<string, Set<string>>();
@@ -171,6 +173,26 @@ export default function ReqEdit() {
       return { ...x, lines: x.lines.map((l) => (l.key === key && !l.orderPrice ? { ...l, ...suggest(l) } : l)) };
     });
 
+  /** 품명·규격은 목록에서 고른 값만. 바꾸면 자동 단가는 다시 찾는다 */
+  const resetAuto = (l: ReqLine): Partial<ReqLine> => (l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {});
+  const pickItem = (key: string, v: string) => {
+    const l = d.lines.find((x) => x.key === key);
+    if (!l || v === l.itemName) return;
+    const keepSpec = specOptions(v).some((x) => nameKey(x) === nameKey(l.spec));
+    setLine(key, { itemName: v, ...(keepSpec ? {} : { spec: '' }), ...resetAuto(l) });
+    autoPrice(key);
+  };
+  const pickSpec = (key: string, item: string, v: string) => {
+    const l = d.lines.find((x) => x.key === key);
+    if (!l || v === l.spec) return;
+    const us = specUnit.units.get(`${nameKey(item)}|${nameKey(v)}`);
+    setLine(key, { spec: v, ...(us?.size === 1 ? { unit: [...us][0] } : {}), ...resetAuto(l) });
+    autoPrice(key);
+  };
+  /** 목록에 없는 품명·규격 줄 (엑셀·붙여넣기로 들어온 줄) */
+  const invalidLine = (l: ReqLine) =>
+    !!l.itemName.trim() && (!itemSet.has(nameKey(l.itemName)) || (!!l.spec.trim() && !specOptions(l.itemName).some((x) => nameKey(x) === nameKey(l.spec))));
+
   const total = d.lines.reduce((a, l) => a + lineAmount(l), 0);
 
   const build = (patch: Partial<Requisition>): Omit<Requisition, 'id'> => {
@@ -213,6 +235,8 @@ export default function ReqEdit() {
     if (!d.lines.some((l) => l.itemName.trim())) return toast('품목을 한 줄 이상 입력하세요.', 'err');
     const bad = d.lines.find((l) => l.itemName.trim() && !l.reqQty);
     if (bad) return toast(`"${bad.itemName}"의 금회청구 수량을 입력하세요.`, 'err');
+    const wrong = d.lines.filter(invalidLine);
+    if (wrong.length) return toast(`목록에 없는 품명·규격이 ${wrong.length}줄 있습니다 (빨간 칸). 목록에서 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
     const miss = d.steps.findIndex((s) => !s.userId);
     if (miss >= 0) return toast(`결재선 ${miss + 1}번째(${d.steps[miss].label}) 결재자를 지정하세요.`, 'err');
     const steps = d.steps.map((s) => ({ label: s.label, userId: s.userId, userName: s.userName }));
@@ -460,11 +484,6 @@ export default function ReqEdit() {
             </div>
           )}
         </div>
-        <datalist id="item-names">
-          {itemOptions.map((n) => (
-            <option key={n} value={n} />
-          ))}
-        </datalist>
         {!d.lines.length ? (
           <Empty>품목이 없습니다.</Empty>
         ) : (
@@ -501,23 +520,32 @@ export default function ReqEdit() {
                   return (
                     <tr key={l.key}>
                       <td className="text-muted">{i + 1}</td>
-                      <td>{T(l.key, 'itemName', l.itemName, editable, 'w-44', { list: 'item-names', onBlur: () => autoPrice(l.key) })}</td>
                       <td>
-                        {T(l.key, 'spec', l.spec, editable, 'w-24', {
-                          list: `spec-${l.key}`,
-                          placeholder: specOptions(l.itemName).length ? '선택 ▾' : '',
-                          onBlur: () => {
-                            autoPrice(l.key);
-                            const u = unitOptions(l.itemName, l.spec);
-                            if (!l.unit && specUnit.units.get(`${nameKey(l.itemName)}|${nameKey(l.spec)}`)?.size === 1) setLine(l.key, { unit: u[0] });
-                          },
-                        })}
-                        {editable && (
-                          <datalist id={`spec-${l.key}`}>
-                            {specOptions(l.itemName).map((x) => (
-                              <option key={x} value={x} />
-                            ))}
-                          </datalist>
+                        {editable ? (
+                          <PickInput
+                            className="w-44"
+                            value={l.itemName}
+                            options={itemOptions}
+                            invalid={!!l.itemName && !itemSet.has(nameKey(l.itemName))}
+                            placeholder="품명 선택 ▾"
+                            onPick={(v) => pickItem(l.key, v)}
+                          />
+                        ) : (
+                          <span>{l.itemName}</span>
+                        )}
+                      </td>
+                      <td>
+                        {editable ? (
+                          <PickInput
+                            className="w-28"
+                            value={l.spec}
+                            options={specOptions(l.itemName)}
+                            invalid={!!l.spec && !specOptions(l.itemName).some((x) => nameKey(x) === nameKey(l.spec))}
+                            placeholder={l.itemName ? '규격 선택 ▾' : '품명 먼저'}
+                            onPick={(v) => pickSpec(l.key, l.itemName, v)}
+                          />
+                        ) : (
+                          <span>{l.spec}</span>
                         )}
                       </td>
                       <td>
