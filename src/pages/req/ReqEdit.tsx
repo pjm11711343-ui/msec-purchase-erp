@@ -235,8 +235,7 @@ export default function ReqEdit() {
 
   const submit = () => {
     if (!d.lines.some((l) => l.itemName.trim())) return toast('품목을 한 줄 이상 입력하세요.', 'err');
-    const bad = d.lines.find((l) => l.itemName.trim() && !l.reqQty);
-    if (bad) return toast(`"${bad.itemName}"의 금회청구 수량을 입력하세요.`, 'err');
+    // 금회청구 수량이 비어 있어도 결재를 올릴 수 있다 (수량은 결재 중 자재부가 발주수량으로 정함)
     const wrong = d.lines.filter(invalidLine);
     if (wrong.length) return toast(`목록에 없는 품명·규격이 ${wrong.length}줄 있습니다 (빨간 칸). 목록에서 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
     // 결재자 미지정 칸은 건너뜀
