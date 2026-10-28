@@ -6,9 +6,10 @@ import { audit, commitBatch } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { useSites } from '../../lib/hooks';
 import { won } from '../../lib/normalize';
-import { usePurchaseOrders } from '../../lib/pos';
+import { preOrderState, usePurchaseOrders } from '../../lib/pos';
+import { useRequisitions } from '../../lib/reqs';
 import { errMsg, useToast } from '../../components/ui';
-import { PoChip } from './PoList';
+import { PoChip, PreChip } from './PoList';
 import type { PurchaseOrder, Site } from '../../types';
 
 export const MIN_ROWS = 18;
@@ -40,6 +41,7 @@ export default function PoDetail() {
   const nav = useNavigate();
   const isOffice = can('admin', 'material');
   const pos = usePurchaseOrders();
+  const reqs = useRequisitions();
   const sites = useSites();
   const toast = useToast();
   const po = pos.data.find((p) => p.id === id);
@@ -140,6 +142,7 @@ export default function PoDetail() {
         </Link>
         <span className="text-[17px] font-bold text-navy-950">{po.poNo}</span>
         <PoChip s={po.status} />
+        <PreChip s={preOrderState(po, reqs.data)} />
         <span className="text-muted">
           {po.siteName} · {po.vendorName} · {won(po.totalAmount)}원
         </span>

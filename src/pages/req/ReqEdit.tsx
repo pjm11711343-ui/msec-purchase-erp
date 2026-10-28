@@ -219,6 +219,8 @@ export default function ReqEdit() {
     !!l.itemName.trim() && (!itemSet.has(normItem(l.itemName)) || (!!l.spec.trim() && !specOk(l.itemName, l.spec)));
 
   const total = d.lines.reduce((a, l) => a + lineAmount(l), 0);
+  /** 이 청구서에서 이미 발주된 발주서 (결재 중이면 선발주) */
+  const preOrdered = d.id ? d.lines.map((l) => ordered.get(`${d.id}|${l.key}`)).filter((p): p is NonNullable<typeof p> => !!p) : [];
 
   const build = (patch: Partial<Requisition>): Omit<Requisition, 'id'> => {
     const ls = d.lines
@@ -270,6 +272,7 @@ export default function ReqEdit() {
 
   const decide = (result: 'approved' | 'rejected') => {
     if (result === 'rejected' && !comment.trim()) return toast('반려 사유를 적어 주세요.', 'err');
+    if (result === 'rejected' && preOrdered.length && !confirm(`이 청구서는 이미 선발주된 줄이 ${preOrdered.length}개 있습니다 (${[...new Set(preOrdered.map((p) => p.poNo))].join(', ')}).\n반려하면 발주서에 '청구 반려'로 표시됩니다. 발주 취소는 발주 화면에서 따로 해야 합니다.\n반려할까요?`)) return;
     const j = myDecideStep(d as Requisition, profile?.id, can('admin'));
     if (j < 0) return toast('지금 결재할 차례가 아닙니다.', 'err');
     const now = Date.now();
@@ -289,7 +292,9 @@ export default function ReqEdit() {
   };
 
   const reopen = () =>
-    save({ status: 'draft', currentStep: 0, currentApproverId: undefined, steps: d.steps.map((s) => ({ label: s.label, userId: s.userId, userName: s.userName })) }, '다시 작성', '작성중으로 돌렸습니다.');
+    preOrdered.length
+      ? toast(`이미 선발주된 줄이 있어 회수할 수 없습니다 (${[...new Set(preOrdered.map((p) => p.poNo))].join(', ')}). 자재부에 문의하세요.`, 'err')
+      : save({ status: 'draft', currentStep: 0, currentApproverId: undefined, steps: d.steps.map((s) => ({ label: s.label, userId: s.userId, userName: s.userName })) }, '다시 작성', '작성중으로 돌렸습니다.');
 
   const remove = async () => {
     if (!d.id || !confirm('이 청구서를 삭제할까요?')) return;
@@ -459,6 +464,11 @@ export default function ReqEdit() {
         }
       />
 
+      {d.status === 'pending' && preOrdered.length > 0 && (
+        <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[12.5px] text-violet-800">
+          결재 중이지만 자재부가 먼저 발주(선발주)한 줄이 {preOrdered.length}개 있습니다: {[...new Set(preOrdered.map((p) => p.poNo))].join(', ')}
+        </div>
+      )}
       <div className="mb-4 grid gap-4 xl:grid-cols-[1fr_420px]">
         <div className="card grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
           <Field label="현장">

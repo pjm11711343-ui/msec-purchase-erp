@@ -23,20 +23,33 @@ export interface PendingLine {
   req: Requisition;
   line: ReqLine;
   key: string; // reqId|lineKey
+  pre: boolean; // 결재 중 (선발주 대상)
 }
 
-/** 승인됐지만 아직 발주되지 않은 청구 줄 */
-export function pendingLines(reqs: Requisition[], pos: PurchaseOrder[]): PendingLine[] {
+/** 승인됐지만 아직 발주되지 않은 청구 줄. withPending 이면 결재 중인 청구서 줄도 (선발주) */
+export function pendingLines(reqs: Requisition[], pos: PurchaseOrder[], withPending = false): PendingLine[] {
   const done = orderedKeys(pos);
   const out: PendingLine[] = [];
   for (const r of reqs) {
-    if (r.status !== 'approved') continue;
+    const pre = r.status === 'pending';
+    if (r.status !== 'approved' && !(withPending && pre)) continue;
     for (const l of r.lines) {
       const key = `${r.id}|${l.key}`;
-      if (!done.has(key) && (l.orderQty || l.reqQty) > 0) out.push({ req: r, line: l, key });
+      if (!done.has(key) && (l.orderQty || l.reqQty) > 0) out.push({ req: r, line: l, key, pre });
     }
   }
   return out;
+}
+
+export type PreState = 'pending' | 'approved' | 'rejected' | 'draft';
+/** 선발주 발주서의 청구서 결재 상태 (반려 > 결재 중 > 승인) */
+export function preOrderState(po: PurchaseOrder, reqs: Requisition[]): PreState | undefined {
+  if (!po.preOrder) return undefined;
+  const st = po.reqIds.map((id) => reqs.find((r) => r.id === id)?.status);
+  if (st.includes('rejected')) return 'rejected';
+  if (st.includes('draft')) return 'draft';
+  if (st.includes('pending')) return 'pending';
+  return 'approved';
 }
 
 export function yymmdd(date: string) {

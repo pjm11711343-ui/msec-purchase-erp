@@ -5,7 +5,7 @@ import { audit, commitBatch, newId } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { useSites, useVendors } from '../../lib/hooks';
 import { won } from '../../lib/normalize';
-import { nextPoNo, pendingLines, usePurchaseOrders, type PendingLine } from '../../lib/pos';
+import { nextPoNo, pendingLines, preOrderState, usePurchaseOrders, type PendingLine, type PreState } from '../../lib/pos';
 import { useRequisitions } from '../../lib/reqs';
 import { Empty, errMsg, PageHeader, useSelection, useToast } from '../../components/ui';
 import { PO_STATUS_LABEL, type PoLine, type PoStatus, type PurchaseOrder } from '../../types';
@@ -16,6 +16,22 @@ export function PoChip({ s }: { s: PoStatus }) {
   const c = s === 'sent' ? 'bg-emerald-50 text-emerald-700' : s === 'cancelled' ? 'bg-line text-muted line-through' : 'bg-amber-soft text-amber-800';
   return <span className={`chip ${c}`}>{PO_STATUS_LABEL[s]}</span>;
 }
+
+/** 선발주 표시: 청구서 결재가 어디까지 왔는지 */
+export function PreChip({ s }: { s?: PreState }) {
+  if (!s) return null;
+  const [c, t] =
+    s === 'approved'
+      ? ['bg-emerald-50 text-emerald-700', '선발주 · 승인 완료']
+      : s === 'rejected'
+        ? ['bg-red-50 text-red-700', '선발주 · 청구 반려']
+        : s === 'draft'
+          ? ['bg-red-50 text-red-700', '선발주 · 청구 회수됨']
+          : ['bg-violet-50 text-violet-700', '선발주 · 결재 중'];
+  return <span className={`chip ${c}`}>{t}</span>;
+}
+
+const PRE_KEY = 'po.withPre';
 
 export default function PoList() {
   const { profile, can } = useAuth();
@@ -32,8 +48,25 @@ export default function PoList() {
   const [statusF, setStatusF] = useState<'' | PoStatus>('');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
+  // 선발주: 결재 중인 청구서 줄도 발주 대기에 보이기 (자재부·관리자)
+  const [withPre, setWithPreState] = useState(() => {
+    try {
+      return localStorage.getItem(PRE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setWithPre = (v: boolean) => {
+    setWithPreState(v);
+    try {
+      localStorage.setItem(PRE_KEY, v ? '1' : '0');
+    } catch {
+      /* 무시 */
+    }
+  };
 
-  const pend = useMemo(() => pendingLines(reqs.data, pos.data), [reqs.data, pos.data]);
+  const pend = useMemo(() => pendingLines(reqs.data, pos.data, isOffice && withPre), [reqs.data, pos.data, isOffice, withPre]);
+  const preCount = useMemo(() => (isOffice ? pendingLines(reqs.data, pos.data, true).filter((p) => p.pre).length : 0), [reqs.data, pos.data, isOffice]);
   const vendorOf = (p: PendingLine) => vendorPick[p.key] ?? p.line.vendorId ?? '';
 
   // 현장 → 업체 → 줄
@@ -58,6 +91,8 @@ export default function PoList() {
     if (!chosen.length) return toast('발주할 줄을 고르세요.', 'err');
     const noVendor = chosen.filter((p) => !vendorOf(p));
     if (noVendor.length) return toast(`거래선이 없는 줄이 ${noVendor.length}개 있습니다. 거래선을 고르세요.`, 'err');
+    const preN = chosen.filter((p) => p.pre).length;
+    if (preN && !confirm(`결재가 끝나지 않은 청구서 줄 ${preN}개를 선발주합니다.\n발주서에 '선발주'로 표시되고, 청구서가 승인되면 '승인 완료'로 바뀝니다.\n계속할까요?`)) return;
     setBusy(true);
     try {
       const byKey = new Map<string, PendingLine[]>();
@@ -94,6 +129,7 @@ export default function PoList() {
           };
         });
         const firstReq = list[0].req;
+        const pre = list.some((p) => p.pre);
         const po: Omit<PurchaseOrder, 'id'> = {
           poNo,
           siteId,
@@ -113,11 +149,12 @@ export default function PoList() {
           orderedBy: profile?.id ?? '',
           orderedByName: [profile?.name, profile?.position].filter(Boolean).join(' '),
           signNames: firstReq.steps.map((s) => ({ label: s.label, name: s.userName })),
+          ...(pre ? { preOrder: true } : {}),
           createdAt: Date.now(),
-          history: [{ at: Date.now(), by: profile?.name ?? '', action: '발주서 생성' }],
+          history: [{ at: Date.now(), by: profile?.name ?? '', action: pre ? '선발주 (청구서 결재 중)' : '발주서 생성' }],
         };
         ops.push({ type: 'set', col: C.purchaseOrders, id: newId(C.purchaseOrders), data: po, merge: false });
-        made.push(`${poNo} ${v?.name}`);
+        made.push(`${poNo} ${v?.name}${pre ? ' (선발주)' : ''}`);
       }
       await commitBatch(ops);
       await audit('발주서 생성', made.join(', '));
@@ -146,7 +183,7 @@ export default function PoList() {
     <div>
       <PageHeader
         title="발주"
-        desc="승인된 구매청구 품목을 현장·거래선별로 묶어 발주서를 만듭니다. 발주서는 원 양식대로 인쇄하거나 PDF로 저장해 보내세요."
+        desc="승인된 구매청구 품목을 현장·거래선별로 묶어 발주서를 만듭니다. 자재부·관리자는 결재 중인 청구서도 선발주할 수 있습니다. 발주서는 원 양식대로 인쇄하거나 PDF로 저장해 보내세요."
         actions={
           tab === 'pending' &&
           isOffice && (
@@ -166,6 +203,12 @@ export default function PoList() {
           <button className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${tab === 'list' ? 'bg-navy-950 text-white' : 'text-muted hover:bg-canvas'}`} onClick={() => setTab('list')}>
             발주서 목록
           </button>
+          {isOffice && tab === 'pending' && (
+            <label className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] ${withPre ? 'bg-violet-50 text-violet-800' : 'text-muted'}`} title="결재가 끝나기 전의 청구서 줄도 먼저 발주합니다 (자재부·관리자)">
+              <input type="checkbox" checked={withPre} onChange={(e) => setWithPre(e.target.checked)} />
+              결재 중 청구서도 보기 (선발주){preCount ? ` · ${preCount}줄` : ''}
+            </label>
+          )}
           <div className="ml-auto flex flex-wrap gap-2">
             <select className="input h-7" value={siteF} onChange={(e) => setSiteF(e.target.value)}>
               <option value="">전체 현장</option>
@@ -193,7 +236,7 @@ export default function PoList() {
 
         {tab === 'pending' ? (
           !groups.size ? (
-            <Empty>{reqs.loading ? '불러오는 중…' : '발주할 품목이 없습니다. 구매청구가 최종 승인되면 여기에 나타납니다.'}</Empty>
+            <Empty>{reqs.loading ? '불러오는 중…' : withPre ? '발주할 품목이 없습니다.' : '발주할 품목이 없습니다. 구매청구가 최종 승인되면 여기에 나타납니다. 결재 중인 청구서를 먼저 발주하려면 위의 \'결재 중 청구서도 보기 (선발주)\'를 켜세요.'}</Empty>
           ) : (
             <div className="max-h-[calc(100vh-220px)] overflow-auto">
               {[...groups].map(([siteId, byVendor]) => (
@@ -243,6 +286,11 @@ export default function PoList() {
                                     <Link to={`/req/${p.req.id}`} className="text-navy-900 hover:underline">
                                       {p.req.docNo || p.req.requestDate}
                                     </Link>
+                                    {p.pre && (
+                                      <span className="chip ml-1 bg-violet-50 text-violet-700" title="결재가 끝나지 않은 청구서입니다. 발주하면 선발주로 표시됩니다.">
+                                        결재 중 · {p.req.steps[p.req.currentStep]?.label ?? ''}
+                                      </span>
+                                    )}
                                   </td>
                                   <td>{p.line.itemName}</td>
                                   <td>{p.line.spec}</td>
@@ -315,8 +363,8 @@ export default function PoList() {
                     </td>
                     <td className="num">{won(p.totalAmount)}</td>
                     <td className="text-[12px] text-muted">{p.reqDocNos.join(', ')}</td>
-                    <td>
-                      <PoChip s={p.status} />
+                    <td className="whitespace-nowrap">
+                      <PoChip s={p.status} /> <PreChip s={preOrderState(p, reqs.data)} />
                     </td>
                     <td className="text-muted">{p.orderedByName}</td>
                   </tr>
