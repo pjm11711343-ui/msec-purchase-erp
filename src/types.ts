@@ -22,6 +22,7 @@ export interface ErpUser {
   active: boolean;
   position?: string; // 직급
   signImage?: string; // 결재 싸인 (PNG data URL, 바탕 투명)
+  telegramChatId?: string; // 개인 텔레그램 (결재 차례 알림)
 }
 
 export interface Site {
@@ -39,6 +40,7 @@ export interface Site {
   officeContact?: string; // 공무 연락처
   orderDisplayName?: string; // 발주서 '현장' 칸 표기
   allowReqExcel?: boolean; // 현장 사용자(소장·담당)에게 '청구서 엑셀 불러오기' 허용
+  telegramChatId?: string; // 현장 단톡방 (발주 발송·입고 등록 알림)
   active: boolean;
   createdAt?: number;
 }

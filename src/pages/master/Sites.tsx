@@ -5,6 +5,7 @@ import { nameKey } from '../../lib/normalize';
 import CrudTable, { toList } from '../../components/CrudTable';
 import { PageHeader } from '../../components/ui';
 import type { Site } from '../../types';
+import TelegramChatFinder from '../../components/TelegramChatFinder';
 
 const FIELDS = [
   { key: 'code', label: '현장코드', required: true, hint: '예: MS-01' },
@@ -28,6 +29,7 @@ const FIELDS = [
     ],
     hint: '현장소장·현장담당이 청구서 작성 때 엑셀 불러오기·붙여넣기를 쓸 수 있는지. 자재부·관리자는 항상 사용',
   },
+  { key: 'telegramChatId', label: '텔레그램 단톡방 Chat ID', hint: '발주 발송·입고 등록 알림을 받을 현장 단톡방. 위 "텔레그램 대화방 찾기"에서 복사해 붙여 넣으세요 (예: -1001234567890)' },
   { key: 'aliases', label: '다른 표기 (쉼표로 구분)', type: 'list' as const, hint: '계산서 시트 이름 등. 계산서를 올리면 자동으로 늘어납니다.' },
 ];
 
@@ -58,12 +60,13 @@ export default function Sites() {
     orderDisplayName: String(d.orderDisplayName ?? '').trim() || undefined,
     aliases: toList(d.aliases),
     allowReqExcel: d.allowReqExcel === true || d.allowReqExcel === 'true',
+    telegramChatId: String(d.telegramChatId ?? '').trim() || undefined,
     active: prev?.active ?? true,
   });
 
   return (
     <div>
-      <PageHeader title="현장" desc="기계/소방이 나뉜 현장은 서로 다른 현장으로 등록하고 묶음명으로 이어 둡니다." />
+      <PageHeader title="현장" desc="기계/소방이 나뉜 현장은 서로 다른 현장으로 등록하고 묶음명으로 이어 둡니다." actions={<TelegramChatFinder />} />
       <CrudTable<Site>
         rows={sites.data}
         loading={sites.loading}

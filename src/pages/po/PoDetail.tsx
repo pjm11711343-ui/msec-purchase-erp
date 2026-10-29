@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch } from '../../lib/db';
 import { C } from '../../lib/firebase';
-import { useSites } from '../../lib/hooks';
+import { useSites, useVendors } from '../../lib/hooks';
+import { notify } from '../../lib/notify';
+import { elementToPdfBase64 } from '../../lib/poPdf';
 import { won } from '../../lib/normalize';
 import { preOrderState, usePurchaseOrders } from '../../lib/pos';
 import { poLineKey, receivedMap, useReceipts } from '../../lib/receipts';
@@ -49,6 +51,10 @@ export default function PoDetail() {
     return st?.result === 'approved' && st.userId ? signs.byId.get(st.userId) : undefined;
   };
   const sites = useSites();
+  const vendors = useVendors();
+  const pdfRef = useRef<HTMLDivElement>(null);
+  const [pdfMode, setPdfMode] = useState(false);
+  const [sending, setSending] = useState(false);
   const toast = useToast();
   const po = pos.data.find((p) => p.id === id);
   const site = sites.data.find((s) => s.id === po?.siteId);
@@ -79,6 +85,36 @@ export default function PoDetail() {
     }
   };
 
+  /** 발주서 발송: 업체 메일(PDF·포털 링크) + 현장 단톡방 텔레그램 */
+  const sendPo = async () => {
+    const v = vendors.data.find((x) => x.id === po.vendorId);
+    const to = v?.email?.trim() ?? '';
+    if (!to && !confirm(`${po.vendorName} 이메일이 등록되어 있지 않습니다. (기준정보 › 업체)\n메일 없이 현장 텔레그램 알림만 보내고 발송 완료로 표시할까요?`)) return;
+    if (to && !confirm(`${po.vendorName} (${to})에 발주서 PDF를 메일로 보내고, 현장 단톡방에 알릴까요?`)) return;
+    setSending(true);
+    try {
+      let pdfBase64 = '';
+      if (to) {
+        setPdfMode(true);
+        await new Promise((r) => setTimeout(r, 300));
+        if (pdfRef.current) pdfBase64 = await elementToPdfBase64(pdfRef.current);
+      }
+      const r = await notify('po_sent', { poId: po.id, ...(to ? { to, pdfBase64 } : {}) });
+      if (!r.ok) {
+        toast(`발송 실패: ${r.error}`, 'err');
+        return;
+      }
+      const parts = [r.email === 'sent' ? `메일 ${r.to}` : '', r.telegram === 'sent' ? '텔레그램' : ''].filter(Boolean).join(' · ');
+      await update({ status: 'sent', sentAt: Date.now() }, `발송 (${parts || '알림 없음'})`);
+      if (r.telegram !== 'sent') toast('현장 단톡방이 지정되지 않아 텔레그램은 보내지 않았습니다. (기준정보 › 현장)', 'err');
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setPdfMode(false);
+      setSending(false);
+    }
+  };
+
   /** 발주 수정 저장 */
   const saveLines = async () => {
     if (!lineEdit) return;
@@ -106,11 +142,14 @@ export default function PoDetail() {
     const remarkChanged = keep.some((r) => (r.remark.trim() || '') !== (r.l.remark || ''));
     if (!parts.length && !remarkChanged) return setLineEdit(null);
     const reAck = !!po.ackAt && parts.length > 0;
-    await update(
-      { lines, totalAmount: lines.reduce((a, l) => a + l.amount, 0), revisedAt: Date.now(), ...(reAck ? { ackAt: 0, ackBy: '' } : {}) },
-      `발주 수정: ${parts.slice(0, 6).join(', ')}${parts.length > 6 ? ` 외 ${parts.length - 6}건` : ''}${!parts.length ? '비고' : ''}`,
-    );
+    const action = `발주 수정: ${parts.slice(0, 6).join(', ')}${parts.length > 6 ? ` 외 ${parts.length - 6}건` : ''}${!parts.length ? '비고' : ''}`;
+    await update({ lines, totalAmount: lines.reduce((a, l) => a + l.amount, 0), revisedAt: Date.now(), ...(reAck ? { ackAt: 0, ackBy: '' } : {}) }, action);
     setLineEdit(null);
+    // 이미 업체에 보낸 발주서면 바뀐 내용을 메일로 알린다
+    if (po.status === 'sent' && parts.length && confirm('업체에 발주 변경 내용을 메일로 알릴까요?')) {
+      const r = await notify('po_changed', { poId: po.id, change: action.replace(/^발주 수정: /, '') });
+      toast(r.ok ? (r.email === 'sent' ? `${r.to}로 변경 메일을 보냈습니다.` : '업체 이메일이 없어 메일은 보내지 못했습니다.') : `변경 메일 실패: ${r.error}`, r.ok && r.email === 'sent' ? undefined : 'err');
+    }
   };
 
   const mailText = () => {
@@ -211,10 +250,18 @@ export default function PoDetail() {
               <button className="btn-ghost" onClick={() => setEdit({ deliveryTerm: po.deliveryTerm, notice: po.notice, memo: po.memo ?? '' })}>
                 내용 수정
               </button>
-              <button className="btn-primary" onClick={() => update({ status: 'sent', sentAt: Date.now() }, '발송 완료')}>
-                발송 완료 표시
+              <button className="btn-primary" disabled={sending} onClick={sendPo}>
+                {sending ? '보내는 중…' : '메일·텔레그램 발송'}
+              </button>
+              <button className="btn-ghost" title="메일을 따로 보낸 경우" onClick={() => update({ status: 'sent', sentAt: Date.now() }, '발송 완료 (직접 발송)')}>
+                발송 완료 표시만
               </button>
             </>
+          )}
+          {isOffice && po.status === 'sent' && (
+            <button className="btn-ghost" disabled={sending} onClick={sendPo}>
+              {sending ? '보내는 중…' : '다시 발송'}
+            </button>
           )}
           {can('admin') && po.status === 'cancelled' && (
             <button
@@ -245,7 +292,14 @@ export default function PoDetail() {
               onClick={() => {
                 const got = po.lines.reduce((a, l) => a + (rec.get(`${po.id}#${poLineKey(l)}`) ?? 0), 0);
                 if (got > 0) return toast('입고 기록이 있는 발주서는 취소할 수 없습니다. 입고 현황에서 입고를 먼저 취소하세요.', 'err');
-                if (confirm('발주를 취소할까요? 품목은 다시 발주 대기로 돌아갑니다.')) update({ status: 'cancelled', cancelledAt: Date.now() }, '취소');
+                if (!confirm('발주를 취소할까요? 품목은 다시 발주 대기로 돌아갑니다.')) return;
+                const wasSent = po.status === 'sent';
+                void update({ status: 'cancelled', cancelledAt: Date.now() }, '취소').then(async () => {
+                  if (wasSent && confirm('업체에 발주 취소를 메일로 알릴까요?')) {
+                    const r = await notify('po_cancelled', { poId: po.id });
+                    toast(r.ok ? (r.email === 'sent' ? `${r.to}로 취소 메일을 보냈습니다.` : '업체 이메일이 없어 메일은 보내지 못했습니다.') : `취소 메일 실패: ${r.error}`, r.ok && r.email === 'sent' ? undefined : 'err');
+                  }
+                });
               }}
             >
               발주 취소
@@ -355,6 +409,14 @@ export default function PoDetail() {
       })()}
 
       <PoSheet po={po} site={site} boxes={b} internal={internal} showPrice={showPrice} pad={pad} />
+      {pdfMode && (
+        // 메일 첨부용 발주서 (업체용: 결재란 2칸, 단가 표시) — 화면 밖에 그려서 PDF로
+        <div style={{ position: 'fixed', left: -10000, top: 0, width: 800, background: '#fff' }} aria-hidden>
+          <div ref={pdfRef} className="bg-white p-4">
+            <PoSheet po={po} site={site} boxes={b} internal={false} showPrice pad={pad} />
+          </div>
+        </div>
+      )}
 
       <div className="no-print mt-4 grid gap-4 md:grid-cols-2">
         <div className="card px-4 py-3">

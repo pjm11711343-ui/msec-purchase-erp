@@ -18,6 +18,7 @@ import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCata
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { signMap } from '../../lib/sign';
+import { notifyQuiet } from '../../lib/notify';
 import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
 import { similarity } from '../../lib/catMatch';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
@@ -288,8 +289,10 @@ export default function ReqEdit() {
       setComment('');
       setD({ ...data, id: rid });
       if (!d.id) nav(`/req/${rid}`, { replace: true });
+      return rid;
     } catch (e) {
       toast(errMsg(e), 'err');
+      return undefined;
     } finally {
       setBusy(false);
     }
@@ -304,7 +307,10 @@ export default function ReqEdit() {
     const steps: ApprovalStepState[] = d.steps.map((s) => (s.userId ? { label: s.label, userId: s.userId, userName: s.userName } : { label: s.label, result: 'skipped' }));
     const first = nextActive(steps, 0);
     if (first < 0) return toast('결재선에 결재자를 한 명 이상 지정하세요.', 'err');
-    save({ status: 'pending', steps, currentStep: first, currentApproverId: steps[first].userId, approverIds: steps.filter((s) => s.userId).map((s) => s.userId!), submittedAt: Date.now() }, '결재 요청', '결재를 올렸습니다.');
+    // 결재 차례가 된 결재자에게 텔레그램 (개인 Chat ID가 있으면)
+    void save({ status: 'pending', steps, currentStep: first, currentApproverId: steps[first].userId, approverIds: steps.filter((s) => s.userId).map((s) => s.userId!), submittedAt: Date.now() }, '결재 요청', '결재를 올렸습니다.').then(
+      (rid) => rid && notifyQuiet('approval_turn', { reqId: rid }),
+    );
   };
 
   const decide = (result: 'approved' | 'rejected') => {
@@ -325,7 +331,9 @@ export default function ReqEdit() {
     if (result === 'rejected') return save({ status: 'rejected', steps, currentApproverId: undefined }, '반려', '반려했습니다.');
     const next = ceo ? -1 : nextActive(steps, j + 1);
     if (next < 0) return save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.');
-    save({ steps, currentStep: next, currentApproverId: steps[next].userId }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.');
+    void save({ steps, currentStep: next, currentApproverId: steps[next].userId }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.').then(
+      (rid) => rid && notifyQuiet('approval_turn', { reqId: rid }),
+    );
   };
 
   /** 결재 중 수정 저장: 결재 진행은 그대로 두고, 바뀐 내용을 진행 기록에 남긴다 */

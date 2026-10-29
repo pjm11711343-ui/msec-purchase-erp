@@ -4,6 +4,7 @@ import { createAccount } from '../../lib/accounts';
 import { deleteField, orderBy } from 'firebase/firestore';
 import { audit, commitBatch, useCollection } from '../../lib/db';
 import { prepareSign } from '../../lib/sign';
+import TelegramChatFinder from '../../components/TelegramChatFinder';
 import { auth, C, idToEmail, ID_LOGIN_DOMAIN } from '../../lib/firebase';
 import { useSites } from '../../lib/hooks';
 import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
@@ -20,6 +21,7 @@ interface Form {
   siteIds: string[];
   active: boolean;
   sign: string; // 싸인 이미지 ('' = 없음)
+  telegram: string; // 개인 텔레그램 Chat ID
 }
 
 /** 사용자 화면 칸 순서와 설명 */
@@ -32,7 +34,7 @@ const ROLE_DESC: Record<Role, string> = {
   siteStaff: '담당 현장 · 청구서 작성',
 };
 
-const EMPTY: Form = { id: null, name: '', position: '', loginType: 'id', login: '', password: '', role: 'siteStaff', siteIds: [], active: true, sign: '' };
+const EMPTY: Form = { id: null, name: '', position: '', loginType: 'id', login: '', password: '', role: 'siteStaff', siteIds: [], active: true, sign: '', telegram: '' };
 
 export default function Users() {
   const users = useCollection<ErpUser>(C.users, [orderBy('name')]);
@@ -68,6 +70,7 @@ export default function Users() {
         siteIds: needsSites(form.role) ? form.siteIds : [],
         active: form.active,
         ...(form.sign ? { signImage: form.sign } : form.id ? { signImage: deleteField() as unknown as string } : {}),
+        ...(form.telegram.trim() ? { telegramChatId: form.telegram.trim() } : form.id ? { telegramChatId: deleteField() as unknown as string } : {}),
         ...(form.id ? {} : { email, loginId, createdAt: Date.now() }),
       };
       await commitBatch([{ type: 'set', col: C.users, id: uid, data }]);
@@ -141,6 +144,7 @@ export default function Users() {
                           siteIds: u.siteIds ?? [],
                           active: u.active,
                           sign: u.signImage ?? '',
+                          telegram: u.telegramChatId ?? '',
                         })
                       }
                     >
@@ -159,9 +163,12 @@ export default function Users() {
         title="사용자"
         desc="현장소장·현장담당은 담당 현장의 데이터만 볼 수 있습니다. 관리자·자재부는 전체를 봅니다."
         actions={
-          <button className="btn-primary" onClick={() => setForm({ ...EMPTY })}>
-            + 사용자 추가
-          </button>
+          <div className="flex gap-2">
+            <TelegramChatFinder />
+            <button className="btn-primary" onClick={() => setForm({ ...EMPTY })}>
+              + 사용자 추가
+            </button>
+          </div>
         }
       />
       <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
@@ -264,6 +271,11 @@ export default function Users() {
                 </select>
               </Field>
             )}
+            <div className="col-span-2">
+              <Field label="텔레그램 Chat ID (개인)" hint="결재 차례가 되면 개인 텔레그램으로 알림. 이 사람이 ERP 알림 봇에게 아무 말이나 보낸 뒤, 사용자 화면 위 '텔레그램 대화방 찾기'에서 복사해 붙여 넣으세요.">
+                <input className="input" placeholder="예: 123456789" value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} />
+              </Field>
+            </div>
             <div className="col-span-2">
               <Field label="결재 싸인" hint="흰 종이에 쓴 싸인을 찍은 사진·스캔(JPG·PNG). 바탕은 자동으로 지우고 싸인 부분만 잘라 저장합니다. 결재 승인하면 청구서·발주서 결재란에 들어갑니다.">
                 <div className="flex flex-wrap items-center gap-3">

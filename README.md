@@ -151,3 +151,21 @@ erp_requisitions     구매청구서 (결재 단계 포함)
 erp_purchaseOrders   발주서
 erp_receipts         입고 기록
 erp_vendorAccounts   업체 포털 계정 (업체코드)
+
+## 알림 (업체 메일 · 텔레그램)
+
+발주서 "메일·텔레그램 발송"을 누르면 업체에 발주서 PDF 메일, 현장 단톡방에 텔레그램이 갑니다.
+업체 발주 확인 → 자재부 텔레그램, 업체 입고 등록 → 현장 단톡방, 결재 차례 → 결재자 개인 텔레그램, 발주 수정·취소 → 업체 메일.
+
+Vercel 프로젝트 → Settings → Environment Variables 에 아래 값을 넣고 Redeploy 하세요. (값은 화면·저장소에 남지 않습니다)
+
+| 이름 | 값 |
+|---|---|
+| NAVER_MAIL_USER | 보내는 네이버 메일 주소 (예: msec@naver.com) |
+| NAVER_MAIL_PASS | 네이버 메일 앱 비밀번호 (네이버 → 보안설정 → 2단계 인증 → 애플리케이션 비밀번호) |
+| MAIL_FROM_NAME | (선택) 보내는 사람 이름, 기본 "㈜명신기공 자재부" |
+| TELEGRAM_BOT_TOKEN | 텔레그램 @BotFather 로 만든 봇 토큰 |
+| TELEGRAM_OFFICE_CHAT_ID | 업체 발주 확인 알림을 받을 자재부 단톡방(또는 개인) Chat ID |
+
+네이버 메일 환경설정 → POP3/IMAP 설정에서 "IMAP/SMTP 사용"을 켜야 SMTP 발송이 됩니다.
+현장 단톡방·개인 Chat ID는 ERP 기준정보 › 현장 / 사용자 화면의 "텔레그램 대화방 찾기"로 확인해 넣습니다.

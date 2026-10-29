@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { where } from 'firebase/firestore';
+import { notifyQuiet } from '../../lib/notify';
 import { useAuth } from '../../auth/AuthContext';
 import { commitBatch, useCollection } from '../../lib/db';
 import { C } from '../../lib/firebase';
@@ -33,6 +34,7 @@ export default function VendorPortal() {
     try {
       await commitBatch([{ type: 'set', col: C.purchaseOrders, id, data: { ackAt: Date.now(), ackBy: vendor?.vendorName ?? '' } }]);
       toast('발주를 확인했습니다.');
+      notifyQuiet('po_ack', { poId: id });
     } catch (e) {
       toast(errMsg(e), 'err');
     }

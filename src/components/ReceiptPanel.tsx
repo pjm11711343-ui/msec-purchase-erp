@@ -4,6 +4,7 @@ import { audit, commitBatch, newId } from '../lib/db';
 import { C } from '../lib/firebase';
 import { num, won } from '../lib/normalize';
 import { priceDocId, type PoPrice } from '../lib/poPrices';
+import { notifyQuiet } from '../lib/notify';
 import { poLineKey, today } from '../lib/receipts';
 import { commaText, errMsg, useToast } from './ui';
 import type { PurchaseOrder, Receipt } from '../types';
@@ -97,6 +98,8 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
       const n = ops.filter((o) => o.col === C.receipts).length;
       await audit('입고 등록', po.poNo, { lines: n, date });
       toast(`${n}줄 입고를 등록했습니다.`);
+      // 업체가 입고를 등록하면 현장 단톡방에 입고 확인 요청
+      if (isVendor) notifyQuiet('receipt', { poId: po.id, count: n, date });
       setPick(new Set());
       setQty({});
       setPriceIn({});
