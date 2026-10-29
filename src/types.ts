@@ -185,7 +185,7 @@ export interface ReqLine {
   note?: string; // 본/(비고)
   orderQty: number; // 발주수량 (본사 작성)
   orderPrice: number; // 단가 (본사 작성)
-  priceSource?: '계산서' | '단가표' | '직전발주' | '직접입력' | '엑셀';
+  priceSource?: '계산서' | 'ERP단가' | '단가표' | '직전발주' | '직접입력' | '엑셀';
   vendorId?: string; // 거래선
   vendorName?: string;
   remark?: string; // 비고 (청구 내용)

@@ -15,6 +15,7 @@ import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
+import { itemKey, pickListPrice, priceValid, useItemEntries, usePriceList } from '../../lib/itemMaster';
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { signMap } from '../../lib/sign';
@@ -61,6 +62,7 @@ export default function ReqEdit() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [priceFor, setPriceFor] = useState<string | null>(null); // 단가 후보 보기 (line key)
+  const [newItem, setNewItem] = useState<{ itemName: string; spec: string; unit: string; note: string } | null>(null); // 새 품목 등록·요청
 
   const isNew = !id || id === 'new';
   const stored = reqs.data.find((r) => r.id === id) ?? reqs.trash.find((r) => r.id === id);
@@ -116,7 +118,11 @@ export default function ReqEdit() {
   const siteCats = cats.data.filter((c) => c.siteId === d?.siteId).sort((a, b) => a.order - b.order);
   // 품명·규격 목록: 월별 품목명세(계산서) + 단가표 + 지난 청구서. 같은 품목(표기 차이)은 한 줄, 계산서 표기를 먼저 씀
   const catalog = useItemCatalog();
+  const itemEntries = useItemEntries();
+  const priceList = usePriceList();
   const lists = useMemo(() => {
+    const hidden = new Set(itemEntries.data.filter((e) => e.status === 'hidden').map((e) => itemKey(e.itemName, e.spec)));
+    const requested = new Set(itemEntries.data.filter((e) => e.status === 'requested').map((e) => itemKey(e.itemName, e.spec)));
     const items = new Map<string, string>(); // normItem → 표시 이름
     const specs = new Map<string, Map<string, string>>(); // normItem → (normSpec → 표시 규격)
     const units = new Map<string, Set<string>>(); // normItem|normSpec → 단위
@@ -140,13 +146,16 @@ export default function ReqEdit() {
       }
     };
     for (const c of catalog.items) {
-      put(c.i, c.s, c.u);
       cat.set(`${normItem(c.i)}|${normSpec(c.s)}`, c);
+      if (!hidden.has(itemKey(c.i, c.s))) put(c.i, c.s, c.u);
     }
-    prices.rows.forEach((p) => put(p.itemName, p.spec, p.unit));
-    reqs.data.forEach((r) => r.lines.forEach((l) => put(l.itemName, l.spec, l.unit)));
-    return { items, specs, units, unitsItem, cat };
-  }, [catalog.items, prices.rows, reqs.data]);
+    // 직접 등록 품목 (승인됨 + 요청 중: 요청 중인 품목도 바로 쓸 수 있음)
+    itemEntries.data.forEach((e) => (e.status === 'active' || e.status === 'requested') && put(e.itemName, e.spec, e.unit));
+    priceList.data.forEach((p) => put(p.itemName, p.spec, p.unit));
+    prices.rows.forEach((p) => !hidden.has(itemKey(p.itemName, p.spec)) && put(p.itemName, p.spec, p.unit));
+    reqs.data.forEach((r) => r.lines.forEach((l) => !hidden.has(itemKey(l.itemName, l.spec)) && put(l.itemName, l.spec, l.unit)));
+    return { items, specs, units, unitsItem, cat, requested };
+  }, [catalog.items, prices.rows, reqs.data, itemEntries.data, priceList.data]);
   const itemOptions = useMemo(() => [...lists.items.values()].sort((a, b) => a.localeCompare(b, 'ko')), [lists]);
   const itemSet = useMemo(() => new Set(lists.items.keys()), [lists]);
   const sizeOf = (s: string) => {
@@ -184,7 +193,7 @@ export default function ReqEdit() {
 
   const setLine = (key: string, patch: Partial<ReqLine>) => setD((x) => x && { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
-  /** 단가 자동: 최신 계산서 단가(같은 현장 → 전체) → 단가표(거래선 → 최저) → 직전 발주단가 */
+  /** 단가 자동: 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
   const suggest = (l: ReqLine): Partial<ReqLine> => {
     if (!l.itemName) return {};
     const ip = invoicePrice(l.itemName, l.spec, d.siteId);
@@ -193,6 +202,8 @@ export default function ReqEdit() {
       const iv = !l.vendorId ? vendors.data.find((x) => x.id === ip.vid) : undefined;
       return { orderPrice: ip.p, priceSource: '계산서', ...(u && !l.unit ? { unit: u } : {}), ...(iv ? { vendorId: iv.id, vendorName: iv.name } : {}) };
     }
+    const ep = pickListPrice(priceList.data, l.itemName, l.spec, d.siteId, l.vendorId || undefined);
+    if (ep) return { orderPrice: ep.price, priceSource: 'ERP단가', unit: l.unit || ep.unit, ...(!l.vendorId ? { vendorId: ep.vendorId, vendorName: ep.vendorName } : {}) };
     const cands = findPrices(prices.rows, l.itemName, l.spec);
     const v = vendors.data.find((x) => x.id === l.vendorId);
     const forVendor = v ? cands.find((p) => sameVendor(p.vendorName, v.name, v.aliases)) : undefined;
@@ -211,8 +222,41 @@ export default function ReqEdit() {
       return { ...x, lines: x.lines.map((l) => (l.key === key && !l.orderPrice ? { ...l, ...suggest(l) } : l)) };
     });
 
+  /** 새 품목: 자재부·관리자는 바로 등록, 현장은 등록 요청 (요청 중에도 사용 가능) */
+  const saveNewItem = async () => {
+    if (!newItem) return;
+    const item = newItem.itemName.trim();
+    const spec = newItem.spec.trim();
+    if (!item) return toast('품명을 입력하세요.', 'err');
+    if (itemSet.has(normItem(item)) && (!spec || specOk(item, spec))) return toast('이미 목록에 있는 품목입니다. 품명 칸에서 고르세요.', 'err');
+    const now = Date.now();
+    try {
+      await commitBatch([
+        {
+          type: 'set',
+          col: C.items,
+          id: newId(C.items),
+          data: stripUndefined({
+            itemName: item,
+            spec,
+            unit: newItem.unit.trim(),
+            note: newItem.note.trim() || undefined,
+            status: isOffice ? 'active' : 'requested',
+            requestedBy: profile?.id,
+            requestedByName: profile?.name ?? '',
+            requestSiteName: d.siteName,
+            createdAt: now,
+          }),
+        },
+      ]);
+      toast(isOffice ? '품목을 등록했습니다. 품명 칸에서 고르세요.' : '등록 요청했습니다. 지금 바로 품명 칸에서 고를 수 있습니다.');
+      setNewItem(null);
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    }
+  };
   /** 품명·규격은 목록에서 고른 값만. 바꾸면 자동 단가는 다시 찾는다 */
-  const resetAuto = (l: ReqLine): Partial<ReqLine> => (l.priceSource === '계산서' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {});
+  const resetAuto = (l: ReqLine): Partial<ReqLine> => (l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {});
   const pickItem = (key: string, v: string) => {
     const l = d.lines.find((x) => x.key === key);
     if (!l || v === l.itemName) return;
@@ -791,6 +835,9 @@ export default function ReqEdit() {
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, newLine()] })}>
                 + 줄 추가
               </button>
+              <button className="btn-ghost h-7 text-[12px]" title="품명·규격 목록에 없는 품목" onClick={() => setNewItem({ itemName: '', spec: '', unit: '', note: '' })}>
+                {isOffice ? '+ 새 품목 등록' : '+ 새 품목 요청'}
+              </button>
               {draftEditable && (isOffice || sites.data.find((s) => s.id === d.siteId)?.allowReqExcel) && (
                 <>
                   <button className="btn-ghost h-7 text-[12px]" onClick={() => setPasteOpen(true)}>
@@ -887,6 +934,7 @@ export default function ReqEdit() {
                         ) : (
                           <span className="break-words">{l.itemName}</span>
                         )}
+                        {l.itemName && lists.requested.has(itemKey(l.itemName, l.spec)) && <div className="text-[10.5px] text-amber-700" title="자재부 승인 전 품목 (사용은 가능)">품목 등록 요청 중</div>}
                         {l.srcItem && (invalidLine(l) ? (
                           <div className="mt-0.5 text-[10.5px] leading-tight">
                             <div className="font-semibold text-red-600">내역·규격 수정 요함</div>
@@ -1118,6 +1166,8 @@ export default function ReqEdit() {
             const l = d.lines.find((x) => x.key === priceFor)!;
             const cands = findPrices(prices.rows, l.itemName, l.spec);
             const last = lastOrderPrice(reqs.data, l.itemName, l.spec);
+            const ik = itemKey(l.itemName, l.spec);
+            const erpRows = priceList.data.filter((p) => itemKey(p.itemName, p.spec) === ik && (!p.siteId || p.siteId === d.siteId)).sort((a, b) => a.price - b.price);
             const ci = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`);
             const invRows: { label: string; lp: LastPrice }[] = [];
             if (ci?.site[d.siteId]) invRows.push({ label: '이 현장 최신', lp: ci.site[d.siteId] });
@@ -1131,7 +1181,7 @@ export default function ReqEdit() {
                 <div className="mb-2 font-medium">
                   {l.itemName} {l.spec}
                 </div>
-                {!cands.length && !last && !invRows.length && <Empty>계산서·단가표·직전 발주에 이 품목이 없습니다. 단가를 직접 입력하세요.</Empty>}
+                {!cands.length && !last && !invRows.length && !erpRows.length && <Empty>계산서·단가표·직전 발주에 이 품목이 없습니다. 단가를 직접 입력하세요.</Empty>}
                 {invRows.length > 0 && (
                   <table className="tbl mb-3">
                     <thead>
@@ -1163,6 +1213,39 @@ export default function ReqEdit() {
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                )}
+                {erpRows.length > 0 && (
+                  <table className="tbl mb-3">
+                    <thead>
+                      <tr>
+                        <th>ERP 단가표 업체</th>
+                        <th>현장</th>
+                        <th className="num">협가</th>
+                        <th className="num">네고율</th>
+                        <th className="num">구매단가</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {erpRows.map((p) => (
+                        <tr key={p.id} className={priceValid(p) ? '' : 'text-muted'}>
+                          <td>{p.vendorName}</td>
+                          <td>{p.siteName ? <span className="chip bg-amber-soft text-amber-800">이 현장</span> : <span className="text-[12px] text-muted">공통</span>}</td>
+                          <td className="num">{p.listPrice ? won(p.listPrice) : ''}</td>
+                          <td className="num">{p.negoRate ? `${p.negoRate}%` : ''}</td>
+                          <td className="num font-semibold">
+                            {won(p.price)}
+                            {!priceValid(p) && <span className="ml-1 text-[10.5px] text-red-600">기간 밖</span>}
+                          </td>
+                          <td className="text-right">
+                            <button className="btn-dark h-7 text-[12px]" onClick={() => choose({ orderPrice: p.price, priceSource: 'ERP단가', vendorId: p.vendorId, vendorName: p.vendorName })}>
+                              적용
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 )}
@@ -1215,6 +1298,51 @@ export default function ReqEdit() {
               </div>
             );
           })()}
+      </Modal>
+
+      <Modal
+        open={!!newItem}
+        title={isOffice ? '새 품목 등록' : '새 품목 등록 요청'}
+        onClose={() => setNewItem(null)}
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setNewItem(null)}>
+              취소
+            </button>
+            <button className="btn-primary" onClick={saveNewItem}>
+              {isOffice ? '등록' : '요청'}
+            </button>
+          </>
+        }
+      >
+        {newItem && (
+          <div className="space-y-3">
+            <div className="rounded-md bg-canvas px-3 py-2 text-[12.5px] text-muted">
+              {isOffice
+                ? '등록하면 회사 전체 청구서 품명 목록에 바로 나옵니다.'
+                : '요청한 품목은 바로 청구서에 쓸 수 있고, 자재부가 확인(승인·표기 수정·거절)합니다. 비슷한 품목이 목록에 있는지 먼저 확인해 주세요.'}
+            </div>
+            <Field label="품명 *">
+              <input className="input" value={newItem.itemName} onChange={(e) => setNewItem({ ...newItem, itemName: e.target.value })} />
+            </Field>
+            {newItem.itemName.trim().length >= 2 && (() => {
+              const k = nameKey(newItem.itemName);
+              const sim = itemOptions.filter((x) => nameKey(x).includes(k) || k.includes(nameKey(x))).slice(0, 8);
+              return sim.length ? <div className="text-[12px] text-amber-700">목록에 비슷한 품명: {sim.join(', ')}</div> : null;
+            })()}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="규격">
+                <input className="input" value={newItem.spec} onChange={(e) => setNewItem({ ...newItem, spec: e.target.value })} />
+              </Field>
+              <Field label="단위">
+                <input className="input" value={newItem.unit} onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="메모 (용도 등)">
+              <input className="input" value={newItem.note} onChange={(e) => setNewItem({ ...newItem, note: e.target.value })} />
+            </Field>
+          </div>
+        )}
       </Modal>
     </div>
   );

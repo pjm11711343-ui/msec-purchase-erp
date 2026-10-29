@@ -72,6 +72,8 @@ export const C = {
   poPrices: 'erp_poPrices',
   priceCache: 'erp_priceCache',
   reqAlias: 'erp_reqAlias',
+  items: 'erp_items',
+  priceList: 'erp_priceList',
   vendorAccounts: 'erp_vendorAccounts',
   ledgerMeta: 'erp_ledgerMeta', // 월별 품목: itemAlias(품목 합치기), gipyo(집계표 금액)
 } as const;

@@ -20,6 +20,7 @@ import Vendors from './pages/master/Vendors';
 import Categories from './pages/master/Categories';
 import Prices from './pages/master/Prices';
 import ReqAliases from './pages/master/ReqAliases';
+import ItemsPrices from './pages/master/ItemsPrices';
 import Users from './pages/master/Users';
 import Approval from './pages/master/Approval';
 import SettingsPage from './pages/master/Settings';
@@ -83,6 +84,7 @@ export default function App() {
         <Route path="master/vendors" element={<Guard roles={OFFICE}><Vendors /></Guard>} />
         <Route path="master/categories" element={<Guard roles={OFFICE}><Categories /></Guard>} />
         <Route path="master/prices" element={<Guard roles={OFFICE}><Prices /></Guard>} />
+        <Route path="master/items-prices" element={<Guard roles={OFFICE}><ItemsPrices /></Guard>} />
         <Route path="master/req-alias" element={<Guard roles={OFFICE}><ReqAliases /></Guard>} />
         <Route path="master/users" element={<Guard roles={['admin']}><Users /></Guard>} />
         <Route path="master/approval" element={<Guard roles={OFFICE}><Approval /></Guard>} />

@@ -157,6 +157,16 @@ service cloud.firestore {
       allow read: if isErp();
       allow write: if isOffice();
     }
+    // 품목(직접 등록·요청·숨김) · ERP 단가표
+    match /erp_items/{id} {
+      allow read: if isErp();
+      allow create: if isOffice() || (isErp() && request.resource.data.status == 'requested' && request.resource.data.requestedBy == request.auth.uid);
+      allow update, delete: if isOffice();
+    }
+    match /erp_priceList/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
     match /erp_auditLogs/{id} {
       allow create: if isErp() && request.resource.data.uid == request.auth.uid;
       allow read: if isAdmin();
