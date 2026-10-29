@@ -31,10 +31,29 @@ function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
 }
 
 export default function App() {
-  const { fbUser, profile, vendor, loading, logout } = useAuth();
+  const { fbUser, profile, vendor, loading, logout, loadError } = useAuth();
   if (loading) return <div className="flex h-full items-center justify-center text-muted">불러오는 중…</div>;
   if (!fbUser) return <Login />;
   if (vendor) return vendor.active ? <VendorPortal /> : <div className="flex h-full flex-col items-center justify-center gap-3"><div className="text-[16px] font-semibold">사용이 중지된 업체 계정입니다.</div><button className="btn-ghost" onClick={logout}>로그아웃</button></div>;
+  if (!profile && loadError)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <div className="text-[16px] font-semibold">{loadError === 'resource-exhausted' ? 'Firebase 하루 무료 사용량이 다 찼습니다.' : '사용자 정보를 불러오지 못했습니다.'}</div>
+        <div className="max-w-md text-muted">
+          {loadError === 'resource-exhausted'
+            ? '오늘 Firebase(Firestore) 무료 읽기 한도를 넘어 잠시 데이터를 읽을 수 없습니다. 한국 시간 오후 4~5시쯤 한도가 다시 채워지면 그대로 쓸 수 있습니다. 계속 쓰려면 관리자가 Firebase 요금제(Blaze)를 바꿔야 합니다.'
+            : `네트워크나 Firebase 상태를 확인한 뒤 새로고침하세요. (${loadError})`}
+        </div>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={() => location.reload()}>
+            새로고침
+          </button>
+          <button className="btn-ghost" onClick={logout}>
+            로그아웃
+          </button>
+        </div>
+      </div>
+    );
   if (!profile || !profile.active)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">

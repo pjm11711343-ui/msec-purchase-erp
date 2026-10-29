@@ -152,6 +152,11 @@ service cloud.firestore {
       allow read: if isErp();
       allow write: if isOffice();
     }
+    // 단가관리 단가표 사본 (하루 한 번 자재부·관리자 화면에서 갱신)
+    match /erp_priceCache/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
     match /erp_auditLogs/{id} {
       allow create: if isErp() && request.resource.data.uid == request.auth.uid;
       allow read: if isAdmin();

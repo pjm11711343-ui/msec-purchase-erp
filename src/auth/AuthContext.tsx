@@ -16,6 +16,7 @@ interface AuthState {
   siteIds: string[] | null;
   /** 결재자(대표·사장): 결재와 열람만 가능 */
   readOnly: boolean;
+  loadError: string; // 사용자 정보를 못 읽은 이유 (예: Firebase 사용량 한도 초과)
   can: (...roles: Role[]) => boolean;
 }
 
@@ -24,6 +25,7 @@ const Ctx = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [fbUser, setFbUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ErpUser | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [vendor, setVendor] = useState<VendorAccount | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,10 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           doc(db, C.users, u.uid),
           (d) => {
             setProfile(d.exists() ? { ...(d.data() as Omit<ErpUser, 'id'>), id: d.id } : null);
+            setLoadError('');
             done();
           },
-          () => {
+          (e) => {
             setProfile(null);
+            setLoadError((e as { code?: string }).code ?? 'unknown');
             done();
           },
         ),
@@ -94,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout: () => signOut(auth),
     siteIds: profile && (profile.role === 'admin' || profile.role === 'material' || profile.role === 'executive') ? null : (profile?.siteIds ?? []),
     readOnly: profile?.role === 'executive',
+    loadError,
     can: (...roles) => Boolean(profile && profile.active && roles.includes(profile.role)),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

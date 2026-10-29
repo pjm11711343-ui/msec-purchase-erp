@@ -69,9 +69,13 @@ export function buildCatalog(invoices: Invoice[], alias: Record<string, string>)
 }
 
 /** 계산서 전체를 읽어 품명 목록을 다시 만든다 (사무실 사용자) */
-export async function rebuildCatalog(): Promise<number> {
-  const [invSnap, aliasDoc, old] = await Promise.all([getDocs(collection(db, C.invoices)), getDoc(doc(db, C.ledgerMeta, 'itemAlias')), getDocs(collection(db, COL))]);
-  const invoices = invSnap.docs.map((d) => ({ ...(d.data() as Omit<Invoice, 'id'>), id: d.id }));
+export async function rebuildCatalog(loaded?: Invoice[]): Promise<number> {
+  // 화면에서 이미 읽은 계산서가 있으면 다시 읽지 않는다 (읽기 한도 절약)
+  const [invoices, aliasDoc, old] = await Promise.all([
+    loaded ?? getDocs(collection(db, C.invoices)).then((s) => s.docs.map((d) => ({ ...(d.data() as Omit<Invoice, 'id'>), id: d.id }))),
+    getDoc(doc(db, C.ledgerMeta, 'itemAlias')),
+    getDocs(collection(db, COL)),
+  ]);
   const alias = Object.fromEntries((aliasDoc.data()?.pairs ?? []) as [string, string][]);
   const items = buildCatalog(invoices, alias);
   const parts = Math.max(1, Math.ceil(items.length / PART));

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, type FirebaseOptions } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from 'firebase/firestore';
 import fileConfig from '../config/firebase-config.json';
 
 const env = import.meta.env;
@@ -22,7 +22,17 @@ export const app = getApps()[0] ?? initializeApp(isConfigured ? firebaseConfig :
 export const auth = getAuth(app);
 // AI Studio로 만든 프로젝트는 (default)가 아닌 이름 붙은 데이터베이스를 쓴다
 export const FIRESTORE_DB: string = env.VITE_FIRESTORE_DB || fileConfig.firestoreDatabaseId || '(default)';
-export const db = FIRESTORE_DB === '(default)' ? getFirestore(app) : getFirestore(app, FIRESTORE_DB);
+// 브라우저에 Firestore 사본을 둔다 → 화면을 다시 열어도 바뀐 문서만 서버에서 읽음 (무료 읽기 한도 절약)
+function makeDb(): Firestore {
+  try {
+    const settings = { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) };
+    return FIRESTORE_DB === '(default)' ? initializeFirestore(app, settings) : initializeFirestore(app, settings, FIRESTORE_DB);
+  } catch {
+    // 이미 초기화됐거나 브라우저가 저장소를 막으면 기본 방식
+    return FIRESTORE_DB === '(default)' ? getFirestore(app) : getFirestore(app, FIRESTORE_DB);
+  }
+}
+export const db = makeDb();
 
 /** 단가관리시스템 단가 컬렉션 이름 (vendors/{업체}/prices 아래에 있으면 컬렉션 그룹으로 읽는다) */
 export const PRICE_COLLECTION: string = env.VITE_PRICE_COLLECTION || 'prices';
@@ -60,6 +70,7 @@ export const C = {
   purchaseOrders: 'erp_purchaseOrders',
   receipts: 'erp_receipts',
   poPrices: 'erp_poPrices',
+  priceCache: 'erp_priceCache',
   reqAlias: 'erp_reqAlias',
   vendorAccounts: 'erp_vendorAccounts',
   ledgerMeta: 'erp_ledgerMeta', // 월별 품목: itemAlias(품목 합치기), gipyo(집계표 금액)

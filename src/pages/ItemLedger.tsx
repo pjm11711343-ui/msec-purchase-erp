@@ -81,14 +81,14 @@ export default function ItemLedger() {
   useEffect(() => {
     if (isOffice && catalog.ready && !invoices.loading && newestInv > catalog.at && !catBusy) {
       setCatBusy(true);
-      rebuildCatalog().catch(() => undefined).finally(() => setCatBusy(false));
+      rebuildCatalog(invoices.data).catch(() => undefined).finally(() => setCatBusy(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOffice, invoices.loading, newestInv, catalog.at]);
   const remakeCatalog = async () => {
     setCatBusy(true);
     try {
-      const n = await rebuildCatalog();
+      const n = await rebuildCatalog(invoices.data);
       toast(`구매청구 품명 목록을 새로 만들었습니다. (${n.toLocaleString()}개 품목·규격)`);
     } catch (e) {
       toast(errMsg(e), 'err');

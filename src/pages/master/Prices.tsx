@@ -1,79 +1,62 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, collectionGroup, getDocs, limit, query, type DocumentData } from 'firebase/firestore';
-import { db, PRICE_COLLECTION, PRICE_VENDOR_COLLECTION } from '../../lib/firebase';
-import { Empty, PageHeader } from '../../components/ui';
+import { loadPrices, priceCacheAt, type PriceRow } from '../../lib/prices';
+import { nameKey, won } from '../../lib/normalize';
+import { Empty, errMsg, PageHeader, useToast } from '../../components/ui';
 
-// 단가관리시스템 필드 이름을 모르므로, 자주 쓰는 이름을 앞에 두고 나머지는 뒤에 붙인다
-const PREFERRED = ['업체', '품번', 'code', '카테고리', 'category', '품명', 'name', 'itemName', '규격', 'spec', '단위', 'unit', '협가', 'listPrice', '네고율', 'nego', 'negoRate', '구매단가', 'price', 'purchasePrice', '메이커', 'maker', '최근변경일', 'updatedAt'];
-const HIDE = new Set(['id', 'vendorId']);
-
-type Row = Record<string, unknown> & { id: string };
-
-function show(v: unknown): string {
-  if (v == null) return '';
-  if (typeof v === 'number') return v.toLocaleString('ko-KR');
-  if (typeof v === 'object' && 'toDate' in (v as object)) return (v as { toDate: () => Date }).toDate().toLocaleDateString('ko-KR');
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
-}
-
+/** 단가 조회: ERP에 둔 단가표 사본을 보여준다 (원본은 단가관리시스템, 하루 한 번 자동 갱신) */
 export default function Prices() {
-  const [rows, setRows] = useState<Row[]>([]);
+  const toast = useToast();
+  const [rows, setRows] = useState<PriceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [at, setAt] = useState(0);
 
   useEffect(() => {
-    (async () => {
-      try {
-        // 업체 이름표
-        const vSnap = await getDocs(collection(db, PRICE_VENDOR_COLLECTION));
-        const vName = new Map<string, string>();
-        vSnap.docs.forEach((d) => {
-          const x = d.data() as DocumentData;
-          vName.set(d.id, String(x.name ?? x.companyName ?? d.id));
-        });
-        // vendors/{업체}/prices 전부 (컬렉션 그룹)
-        const pSnap = await getDocs(query(collectionGroup(db, PRICE_COLLECTION), limit(10000)));
-        setRows(
-          pSnap.docs.map((d) => {
-            const vendorId = d.ref.parent.parent?.id ?? '';
-            return { 업체: vName.get(vendorId) ?? vendorId, ...(d.data() as DocumentData), id: d.ref.path, vendorId };
-          }),
-        );
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadPrices({ canRebuild: true })
+      .then((r) => (setRows(r), setAt(priceCacheAt())))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setLoading(false));
   }, []);
 
-  const cols = useMemo(() => {
-    const keys = new Set<string>();
-    rows.slice(0, 200).forEach((r) => Object.keys(r).forEach((k) => !HIDE.has(k) && keys.add(k)));
-    const pref = PREFERRED.filter((k) => keys.has(k));
-    return [...pref, ...[...keys].filter((k) => !pref.includes(k)).sort()].slice(0, 14);
-  }, [rows]);
+  const refresh = async () => {
+    if (!confirm('단가관리시스템 원본에서 단가표를 다시 불러올까요? (단가 수만큼 Firebase 읽기를 씁니다)')) return;
+    setBusy(true);
+    try {
+      const r = await loadPrices({ force: true, canRebuild: true });
+      setRows(r);
+      setAt(priceCacheAt());
+      toast(`단가 ${r.length.toLocaleString()}건을 새로 불러왔습니다.`);
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const shown = useMemo(() => {
-    const k = q.trim().toLowerCase();
-    return (k ? rows.filter((r) => cols.some((c) => show(r[c]).toLowerCase().includes(k))) : rows).slice(0, 500);
-  }, [rows, q, cols]);
+    const k = nameKey(q);
+    return (k ? rows.filter((r) => nameKey([r.vendorName, r.itemName, r.spec, r.maker].join(' ')).includes(k)) : rows).slice(0, 500);
+  }, [rows, q]);
 
   return (
     <div>
       <PageHeader
         title="단가 조회"
-        desc={`단가관리시스템의 ${PRICE_VENDOR_COLLECTION}/{업체}/${PRICE_COLLECTION} 데이터를 읽기만 합니다. 단가 수정은 단가관리시스템에서 하세요. 2단계 구매청구서에서 이 단가를 자동으로 채웁니다.`}
-        actions={<input className="input w-64" placeholder="업체·품명·규격 검색" value={q} onChange={(e) => setQ(e.target.value)} />}
+        desc={`단가관리시스템 단가표의 ERP 사본입니다${at ? ` (${new Date(at).toLocaleString('ko-KR')} 기준, 하루 한 번 자동 갱신)` : ''}. 단가 수정은 단가관리시스템에서 하세요. 구매청구서 단가 자동 채우기에 씁니다.`}
+        actions={
+          <div className="flex gap-2">
+            <input className="input w-64" placeholder="업체·품명·규격 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className="btn-ghost" disabled={busy} onClick={refresh}>
+              {busy ? '불러오는 중…' : '원본에서 새로 불러오기'}
+            </button>
+          </div>
+        }
       />
       <div className="card overflow-hidden">
         {error ? (
-          <Empty>
-            단가를 읽지 못했습니다: {error}
-            <br />
-            Firestore 보안 규칙에 prices 컬렉션 그룹 읽기 규칙이 있는지 확인하세요 (README 4번).
-          </Empty>
+          <Empty>단가를 읽지 못했습니다: {error}</Empty>
         ) : !shown.length ? (
           <Empty>{loading ? '불러오는 중…' : '단가 데이터가 없습니다.'}</Empty>
         ) : (
@@ -81,28 +64,34 @@ export default function Prices() {
             <table className="tbl">
               <thead>
                 <tr>
-                  {cols.map((c) => (
-                    <th key={c}>{c}</th>
-                  ))}
+                  <th>업체</th>
+                  <th>품명</th>
+                  <th>규격</th>
+                  <th>단위</th>
+                  <th className="num">협가</th>
+                  <th className="num">네고율</th>
+                  <th className="num">구매단가</th>
+                  <th>메이커</th>
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r) => (
-                  <tr key={r.id}>
-                    {cols.map((c) => (
-                      <td key={c} className={typeof r[c] === 'number' ? 'num' : ''}>
-                        {show(r[c])}
-                      </td>
-                    ))}
+                {shown.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.vendorName}</td>
+                    <td>{r.itemName}</td>
+                    <td>{r.spec}</td>
+                    <td>{r.unit}</td>
+                    <td className="num">{r.listPrice ? won(r.listPrice) : ''}</td>
+                    <td className="num">{r.negoRate ? `${r.negoRate}%` : ''}</td>
+                    <td className="num font-semibold">{won(r.buyPrice)}</td>
+                    <td className="text-muted">{r.maker}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {rows.length > shown.length && <div className="px-4 py-2 text-[12px] text-muted">{rows.length.toLocaleString()}건 중 {shown.length}건 표시 — 검색으로 좁히세요</div>}
           </div>
         )}
-        <div className="border-t border-line px-4 py-2 text-[12px] text-muted">
-          전체 {rows.length.toLocaleString()}건 중 {shown.length.toLocaleString()}건 표시 (최대 500건)
-        </div>
       </div>
     </div>
   );
