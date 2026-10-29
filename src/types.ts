@@ -192,6 +192,7 @@ export interface ReqLine {
   dueDate?: string; // 희망 납기일
   location?: string; // 사용 위치/공정
   siteCategoryId?: string; // 자재분류(현장분류)
+  catAuto?: boolean; // 품목의 자재분류로 자동으로 들어간 값 (품목을 바꾸면 다시 찾음)
 }
 
 export interface ApprovalStepState {

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
 import { C } from '../../lib/firebase';
-import { useSiteCategories, useSites, useVendors } from '../../lib/hooks';
+import { useSiteCategories, useSites, useStandardCategories, useVendors } from '../../lib/hooks';
 import { fillReqForm } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
@@ -15,7 +15,7 @@ import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
-import { itemKey, pickListPrice, priceValid, useItemEntries, usePriceList } from '../../lib/itemMaster';
+import { itemKey, makeItemStd, pickListPrice, priceValid, siteCatOfStd, useItemCats, useItemEntries, usePriceList } from '../../lib/itemMaster';
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { signMap } from '../../lib/sign';
@@ -120,6 +120,13 @@ export default function ReqEdit() {
   const catalog = useItemCatalog();
   const itemEntries = useItemEntries();
   const priceList = usePriceList();
+  const stdCats = useStandardCategories();
+  const itemCats = useItemCats();
+  // 품목 → 표준 자재분류 (기준정보 › 품목·단가에서 지정 / 계산서 자동)
+  const itemStd = useMemo(
+    () => makeItemStd({ itemCats: itemCats.data, entries: itemEntries.data, catalog: catalog.items, siteCats: cats.data, std: stdCats.data }),
+    [itemCats.data, itemEntries.data, catalog.items, cats.data, stdCats.data],
+  );
   const lists = useMemo(() => {
     const hidden = new Set(itemEntries.data.filter((e) => e.status === 'hidden').map((e) => itemKey(e.itemName, e.spec)));
     const requested = new Set(itemEntries.data.filter((e) => e.status === 'requested').map((e) => itemKey(e.itemName, e.spec)));
@@ -216,10 +223,17 @@ export default function ReqEdit() {
     if (last) return { orderPrice: last.price, priceSource: '직전발주', ...(!l.vendorId && last.vendorId ? { vendorId: last.vendorId, vendorName: last.vendorName } : {}) };
     return {};
   };
+  /** 자재분류 자동: 품목에 정해진 표준분류 → 이 현장의 자재분류 (직접 고른 분류는 건드리지 않음) */
+  const autoCat = (l: ReqLine): Partial<ReqLine> => {
+    if (!l.itemName || (l.siteCategoryId && !l.catAuto)) return {};
+    const id = siteCatOfStd(itemStd(l.itemName, l.spec).stdCatId, siteCats, stdCats.data);
+    if (id) return { siteCategoryId: id, catAuto: true };
+    return l.catAuto ? { siteCategoryId: undefined, catAuto: undefined } : {};
+  };
   const autoPrice = (key: string) =>
     setD((x) => {
       if (!x) return x;
-      return { ...x, lines: x.lines.map((l) => (l.key === key && !l.orderPrice ? { ...l, ...suggest(l) } : l)) };
+      return { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...(!l.orderPrice ? suggest(l) : {}), ...autoCat(l) } : l)) };
     });
 
   /** 새 품목: 자재부·관리자는 바로 등록, 현장은 등록 요청 (요청 중에도 사용 가능) */
@@ -486,6 +500,7 @@ export default function ReqEdit() {
         if (v) Object.assign(l, { vendorId: v.id, vendorName: v.name });
       }
       if (!l.orderPrice) Object.assign(l, suggest(l));
+      Object.assign(l, autoCat(l));
       return l;
     });
     setD((x) => x && { ...x, lines: [...x.lines.filter((l) => l.itemName.trim()), ...added] });
@@ -588,7 +603,7 @@ export default function ReqEdit() {
       if (!x) return x;
       const idx = x.lines.findIndex((l) => l.key === key);
       if (idx < 0) return x;
-      const patch = { siteCategoryId: c?.id };
+      const patch = { siteCategoryId: c?.id, catAuto: undefined };
       let lines = x.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
       if (c) lines = fillBetween(lines, idx, (l) => l.siteCategoryId ?? '', patch, (l) => !isLocked(l));
       return { ...x, lines };

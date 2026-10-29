@@ -163,6 +163,10 @@ service cloud.firestore {
       allow create: if isOffice() || (isErp() && request.resource.data.status == 'requested' && request.resource.data.requestedBy == request.auth.uid);
       allow update, delete: if isOffice();
     }
+    match /erp_itemCats/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
     match /erp_priceList/{id} {
       allow read: if isErp();
       allow write: if isOffice();

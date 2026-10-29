@@ -7,9 +7,11 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId } from '../../lib/db';
 import { C } from '../../lib/firebase';
-import { useSites, useStandardCategories, useVendors } from '../../lib/hooks';
-import { useItemCatalog } from '../../lib/itemCatalog';
-import { buyPrice, itemKey, priceValid, useItemEntries, usePriceList, type ItemEntry, type PriceEntry } from '../../lib/itemMaster';
+import { useSiteCategories, useSites, useStandardCategories, useVendors } from '../../lib/hooks';
+import { rebuildCatalog, useItemCatalog } from '../../lib/itemCatalog';
+import { stdOfText } from '../../lib/catMatch';
+import type { StandardCategory } from '../../types';
+import { buyPrice, itemCatId, itemKey, makeItemStd, priceValid, useItemCats, useItemEntries, usePriceList, type CatFrom, type ItemEntry, type PriceEntry } from '../../lib/itemMaster';
 import { matchVendor } from '../../lib/nameMatch';
 import { nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
@@ -30,7 +32,11 @@ interface Row {
   lastPrice?: number;
   lastMonth?: string;
   lastVendor?: string;
+  stdCatId: string; // 표준 자재분류
+  catFrom: CatFrom; // 지정 · 등록 · 계산서(자동)
 }
+
+const stdOfRow = (x: { stdCatId: string; from: CatFrom }) => ({ stdCatId: x.stdCatId, catFrom: x.from });
 
 const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 
@@ -44,27 +50,30 @@ export default function ItemsPrices() {
   const vendors = useVendors();
   const sites = useSites();
   const std = useStandardCategories();
+  const siteCats = useSiteCategories();
+  const itemCats = useItemCats();
   const [tab, setTab] = useState<Tab>('items');
   const [compare, setCompare] = useState<{ item: string; spec: string } | null>(null);
   const who = profile?.name ?? '';
 
   // 품목 목록 = 계산서 품목 + 직접 등록 (같은 품목은 한 줄)
   const rows = useMemo(() => {
+    const stdOf = makeItemStd({ itemCats: itemCats.data, entries: entries.data, catalog: catalog.items, siteCats: siteCats.data, std: std.data });
     const m = new Map<string, Row>();
     const hiddenKeys = new Set(entries.data.filter((e) => e.status === 'hidden').map((e) => itemKey(e.itemName, e.spec)));
     for (const c of catalog.items) {
       const k = itemKey(c.i, c.s);
       if (m.has(k)) continue;
-      m.set(k, { key: k, itemName: c.i, spec: c.s, unit: c.u, source: '계산서', hidden: hiddenKeys.has(k), lastPrice: c.last.p, lastMonth: c.last.m, lastVendor: c.last.v, entry: entries.data.find((e) => e.status === 'hidden' && itemKey(e.itemName, e.spec) === k) });
+      m.set(k, { key: k, itemName: c.i, spec: c.s, unit: c.u, source: '계산서', hidden: hiddenKeys.has(k), lastPrice: c.last.p, lastMonth: c.last.m, lastVendor: c.last.v, entry: entries.data.find((e) => e.status === 'hidden' && itemKey(e.itemName, e.spec) === k), ...stdOfRow(stdOf(c.i, c.s)) });
     }
     for (const e of entries.data) {
       if (e.status !== 'active') continue;
       const k = itemKey(e.itemName, e.spec);
       if (m.has(k)) continue;
-      m.set(k, { key: k, itemName: e.itemName, spec: e.spec, unit: e.unit, source: '직접 등록', entry: e, hidden: false });
+      m.set(k, { key: k, itemName: e.itemName, spec: e.spec, unit: e.unit, source: '직접 등록', entry: e, hidden: false, ...stdOfRow(stdOf(e.itemName, e.spec)) });
     }
     return [...m.values()].sort((a, b) => a.itemName.localeCompare(b.itemName, 'ko') || a.spec.localeCompare(b.spec, 'ko'));
-  }, [catalog.items, entries.data]);
+  }, [catalog.items, entries.data, itemCats.data, siteCats.data, std.data]);
   const requests = entries.data.filter((e) => e.status === 'requested');
 
   return (
@@ -86,7 +95,7 @@ export default function ItemsPrices() {
           </button>
         ))}
       </div>
-      {tab === 'items' && <ItemsTab rows={rows} office={office} who={who} std={std.data} onCompare={setCompare} toast={toast} />}
+      {tab === 'items' && <ItemsTab rows={rows} office={office} who={who} std={std.data} catalogAt={catalog.at} onCompare={setCompare} toast={toast} />}
       {tab === 'prices' && <PricesTab list={prices.data} rows={rows} vendors={vendors.data} sites={sites.data} office={office} who={who} onCompare={setCompare} toast={toast} />}
       {tab === 'requests' && <RequestsTab requests={requests} rows={rows} office={office} who={who} toast={toast} />}
       {compare && <PriceCompare item={compare.item} spec={compare.spec} list={prices.data} catalog={catalog.items} sites={sites.data} onClose={() => setCompare(null)} />}
@@ -97,16 +106,70 @@ export default function ItemsPrices() {
 type Toast = ReturnType<typeof useToast>;
 
 /* ───────── 품목 목록 ───────── */
-function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; office: boolean; who: string; std: { id: string; name: string }[]; onCompare: (x: { item: string; spec: string }) => void; toast: Toast }) {
+function ItemsTab({ rows, office, who, std, catalogAt, onCompare, toast }: { rows: Row[]; office: boolean; who: string; std: StandardCategory[]; catalogAt: number; onCompare: (x: { item: string; spec: string }) => void; toast: Toast }) {
   const [q, setQ] = useState('');
   const [src, setSrc] = useState<'' | '계산서' | '직접 등록' | '숨김'>('');
+  const [catF, setCatF] = useState(''); // '' 전체 · '-' 미분류 · 표준분류 id
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [bulkCat, setBulkCat] = useState('');
+  const [catBusy, setCatBusy] = useState(false);
   const [form, setForm] = useState<{ id?: string; itemName: string; spec: string; unit: string; stdCatId: string; note: string } | null>(null);
   const shown = useMemo(() => {
     const k = nameKey(q);
     return rows
       .filter((r) => (src === '숨김' ? r.hidden : src ? r.source === src && !r.hidden : true))
+      .filter((r) => (catF === '-' ? !r.stdCatId : catF ? r.stdCatId === catF : true))
       .filter((r) => !k || nameKey(`${r.itemName} ${r.spec}`).includes(k));
-  }, [rows, q, src]);
+  }, [rows, q, src, catF]);
+  const noCat = rows.filter((r) => !r.hidden && !r.stdCatId).length;
+  const trades = [...new Set(std.map((s) => s.trade || '기타'))];
+  const stdOptions = (
+    <>
+      {trades.map((t) => (
+        <optgroup key={t} label={t}>
+          {std
+            .filter((s) => (s.trade || '기타') === t)
+            .map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+        </optgroup>
+      ))}
+    </>
+  );
+  /** 자재분류 지정 ('' = 지정 해제 → 계산서 자동 분류로) */
+  const setCats = async (targets: Row[], stdCatId: string) => {
+    if (!targets.length) return;
+    try {
+      await commitBatch(
+        targets.map((r) =>
+          stdCatId
+            ? { type: 'set' as const, col: C.itemCats, id: itemCatId(r.itemName, r.spec), data: { itemName: r.itemName, spec: r.spec, stdCatId, byName: who, at: Date.now() }, merge: false }
+            : { type: 'delete' as const, col: C.itemCats, id: itemCatId(r.itemName, r.spec) },
+        ),
+      );
+      if (targets.length > 1) {
+        await audit('품목 자재분류 지정', stdName(stdCatId) || '지정 해제', { n: targets.length });
+        toast(`${targets.length}건의 자재분류를 ${stdCatId ? `"${stdName(stdCatId)}"(으)로 정했습니다` : '자동(계산서)으로 되돌렸습니다'}.`);
+        setSel(new Set());
+      }
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    }
+  };
+  const reloadCats = async () => {
+    if (!confirm('계산서 전체를 다시 읽어 품목별 분류(자동)를 새로 계산할까요? 계산서가 많으면 1~2분 걸릴 수 있습니다.')) return;
+    setCatBusy(true);
+    try {
+      const n = await rebuildCatalog();
+      toast(`계산서 품목 ${n.toLocaleString()}건을 다시 읽었습니다.`);
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setCatBusy(false);
+    }
+  };
   const stdName = (id?: string) => std.find((s) => s.id === id)?.name ?? '';
 
   const save = async () => {
@@ -118,7 +181,12 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
     const now = Date.now();
     const data: Partial<ItemEntry> = { itemName: form.itemName.trim(), spec: form.spec.trim(), unit: form.unit.trim(), ...(form.stdCatId ? { stdCatId: form.stdCatId } : {}), ...(form.note.trim() ? { note: form.note.trim() } : {}), status: 'active', updatedAt: now, ...(form.id ? {} : { createdAt: now, requestedByName: who }) };
     try {
-      await commitBatch([{ type: 'set', col: C.items, id: form.id ?? newId(C.items), data, merge: !!form.id }]);
+      await commitBatch([
+        { type: 'set', col: C.items, id: form.id ?? newId(C.items), data, merge: !!form.id },
+        form.stdCatId
+          ? { type: 'set', col: C.itemCats, id: itemCatId(data.itemName!, data.spec!), data: { itemName: data.itemName, spec: data.spec, stdCatId: form.stdCatId, byName: who, at: now }, merge: false }
+          : { type: 'delete', col: C.itemCats, id: itemCatId(data.itemName!, data.spec!) },
+      ]);
       await audit(form.id ? '품목 수정' : '품목 등록', `${data.itemName} ${data.spec}`);
       toast(form.id ? '수정했습니다.' : '품목을 등록했습니다. 청구서 품명 목록에 바로 나옵니다.');
       setForm(null);
@@ -156,26 +224,39 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
       const ci = h.findIndex((c) => /^품명|^품목/.test(c));
       const cs = h.findIndex((c) => /^규격/.test(c));
       const cu = h.findIndex((c) => /^단위/.test(c));
-      const have = new Set(rows.map((r) => r.key));
+      const cc = h.findIndex((c) => /분류/.test(c));
+      const have = new Map(rows.map((r) => [r.key, r]));
       const ops: Parameters<typeof commitBatch>[0] = [];
       let dup = 0;
+      let catSet = 0;
+      const badCat = new Set<string>();
+      const now = Date.now();
       for (const r of aoa.slice(hi + 1)) {
         const item = String(r[ci] ?? '').trim();
         if (!item) continue;
         const spec = cs >= 0 ? String(r[cs] ?? '').trim() : '';
         const k = itemKey(item, spec);
-        if (have.has(k)) {
+        const catText = cc >= 0 ? String(r[cc] ?? '').trim() : '';
+        const st = catText ? std.find((x) => nameKey(x.name) === nameKey(catText)) ?? stdOfText(catText, std) : undefined;
+        if (catText && !st) badCat.add(catText);
+        const ex = have.get(k);
+        if (st && (!ex || ex.stdCatId !== st.id)) {
+          ops.push({ type: 'set', col: C.itemCats, id: itemCatId(item, spec), data: { itemName: ex?.itemName ?? item, spec: ex?.spec ?? spec, stdCatId: st.id, byName: who, at: now }, merge: false });
+          catSet++;
+        }
+        if (ex) {
           dup++;
           continue;
         }
-        have.add(k);
-        ops.push({ type: 'set', col: C.items, id: newId(C.items), data: { itemName: item, spec, unit: cu >= 0 ? String(r[cu] ?? '').trim() : '', status: 'active', createdAt: Date.now(), requestedByName: who } });
+        have.set(k, { key: k, itemName: item, spec, unit: '', source: '직접 등록', hidden: false, stdCatId: st?.id ?? '', catFrom: st ? '지정' : '' });
+        ops.push({ type: 'set', col: C.items, id: newId(C.items), data: { itemName: item, spec, unit: cu >= 0 ? String(r[cu] ?? '').trim() : '', ...(st ? { stdCatId: st.id } : {}), status: 'active', createdAt: now, requestedByName: who } });
       }
-      if (!ops.length) return toast(`새로 등록할 품목이 없습니다. (이미 있는 품목 ${dup}건)`, 'err');
-      if (!confirm(`새 품목 ${ops.length}건을 등록할까요? (이미 있는 품목 ${dup}건은 건너뜀)`)) return;
+      const added = ops.filter((o) => o.col === C.items).length;
+      if (!ops.length) return toast(`새로 등록하거나 바꿀 품목이 없습니다. (이미 있는 품목 ${dup}건)${badCat.size ? ` · 모르는 분류: ${[...badCat].slice(0, 5).join(', ')}` : ''}`, 'err');
+      if (!confirm(`새 품목 ${added}건 등록, 자재분류 지정 ${catSet}건을 반영할까요?\n(이미 있는 품목 ${dup}건은 등록 건너뜀)${badCat.size ? `\n표준분류에 없는 분류 ${badCat.size}개는 비워 둡니다: ${[...badCat].slice(0, 8).join(', ')}` : ''}`)) return;
       await commitBatch(ops);
-      await audit('품목 엑셀 등록', file.name, { n: ops.length });
-      toast(`${ops.length}건을 등록했습니다.`);
+      await audit('품목 엑셀 등록', file.name, { added, catSet });
+      toast(`등록 ${added}건 · 분류 지정 ${catSet}건을 반영했습니다.`);
     } catch (e) {
       toast(errMsg(e), 'err');
     }
@@ -190,11 +271,19 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
           <option value="직접 등록">직접 등록</option>
           <option value="숨김">숨긴 품목</option>
         </select>
+        <select className="input h-7" value={catF} onChange={(e) => setCatF(e.target.value)}>
+          <option value="">전체 분류</option>
+          <option value="-">미분류만 ({noCat.toLocaleString()})</option>
+          {stdOptions}
+        </select>
         <input className="input h-7 w-56" placeholder="품명·규격 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="text-[12px] text-muted">{shown.length.toLocaleString()}건</span>
         {office && (
           <div className="ml-auto flex gap-2">
-            <label className="btn-ghost h-7 cursor-pointer text-[12px]">
+            <button className="btn-ghost h-7 text-[12px]" disabled={catBusy} title={catalogAt ? `마지막: ${new Date(catalogAt).toLocaleString('ko-KR')}` : ''} onClick={reloadCats}>
+              {catBusy ? '읽는 중…' : '계산서 분류 다시 읽기'}
+            </button>
+            <label className="btn-ghost h-7 cursor-pointer text-[12px]" title="품명·규격·단위·자재분류 열. 이미 있는 품목은 자재분류만 반영">
               엑셀로 등록
               <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => (importExcel(e.target.files?.[0]), (e.target.value = ''))} />
             </label>
@@ -204,6 +293,21 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
           </div>
         )}
       </div>
+      {office && sel.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-amber-soft/60 px-4 py-2 text-[12.5px]">
+          <b>{sel.size}건 선택</b>
+          <select className="input h-7" value={bulkCat} onChange={(e) => setBulkCat(e.target.value)}>
+            <option value="">자동(계산서)으로 되돌리기</option>
+            {stdOptions}
+          </select>
+          <button className="btn-primary h-7 text-[12px]" onClick={() => setCats(rows.filter((r) => sel.has(r.key)), bulkCat)}>
+            자재분류 지정
+          </button>
+          <button className="text-[12px] text-muted hover:text-ink" onClick={() => setSel(new Set())}>
+            선택 해제
+          </button>
+        </div>
+      )}
       {!shown.length ? (
         <Empty>품목이 없습니다.</Empty>
       ) : (
@@ -211,6 +315,11 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
           <table className="tbl">
             <thead>
               <tr>
+                {office && (
+                  <th className="w-8">
+                    <input type="checkbox" checked={shown.length > 0 && shown.slice(0, 600).every((r) => sel.has(r.key))} onChange={(e) => setSel(e.target.checked ? new Set(shown.slice(0, 600).map((r) => r.key)) : new Set())} />
+                  </th>
+                )}
                 <th>품명</th>
                 <th>규격</th>
                 <th>단위</th>
@@ -224,11 +333,41 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
             <tbody>
               {shown.slice(0, 600).map((r) => (
                 <tr key={r.key} className={r.hidden ? 'text-muted line-through' : ''}>
+                  {office && (
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={sel.has(r.key)}
+                        onChange={() =>
+                          setSel((x) => {
+                            const n = new Set(x);
+                            if (n.has(r.key)) n.delete(r.key);
+                            else n.add(r.key);
+                            return n;
+                          })
+                        }
+                      />
+                    </td>
+                  )}
                   <td className="font-medium">{r.itemName}</td>
                   <td>{r.spec}</td>
                   <td>{r.unit}</td>
                   <td>{r.source === '계산서' ? <span className="chip bg-navy-950/5 text-navy-900">계산서</span> : <span className="chip bg-emerald-50 text-emerald-700">직접 등록</span>}</td>
-                  <td className="text-muted">{stdName(r.entry?.status === 'active' ? r.entry.stdCatId : undefined)}</td>
+                  <td className="whitespace-nowrap">
+                    {office ? (
+                      <select
+                        className={`input h-7 max-w-[150px] px-1.5 text-[12px] ${!r.stdCatId ? 'border-amber-400 text-amber-700' : r.catFrom === '계산서' ? 'text-muted' : ''}`}
+                        value={r.stdCatId}
+                        onChange={(e) => setCats([r], e.target.value)}
+                      >
+                        <option value="">{r.catFrom === '지정' ? '자동으로 되돌리기' : '미분류'}</option>
+                        {stdOptions}
+                      </select>
+                    ) : (
+                      <span className={r.stdCatId ? '' : 'text-amber-700'}>{stdName(r.stdCatId) || '미분류'}</span>
+                    )}
+                    {r.catFrom === '계산서' && <span className="ml-1 text-[10.5px] text-muted" title="계산서에서 가장 많이 쓰인 분류 (지정하면 바뀜)">자동</span>}
+                  </td>
                   <td className="num">{r.lastPrice ? won(r.lastPrice) : ''}</td>
                   <td className="text-[12px] text-muted">{r.lastVendor ? `${r.lastVendor} · ${r.lastMonth}` : ''}</td>
                   <td className="whitespace-nowrap text-right">
@@ -237,7 +376,7 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
                     </button>
                     {office && r.source === '직접 등록' && r.entry && (
                       <>
-                        <button className="btn-ghost ml-1 h-7 text-[12px]" onClick={() => setForm({ id: r.entry!.id, itemName: r.itemName, spec: r.spec, unit: r.unit, stdCatId: r.entry!.stdCatId ?? '', note: r.entry!.note ?? '' })}>
+                        <button className="btn-ghost ml-1 h-7 text-[12px]" onClick={() => setForm({ id: r.entry!.id, itemName: r.itemName, spec: r.spec, unit: r.unit, stdCatId: r.catFrom === '계산서' ? '' : r.stdCatId, note: r.entry!.note ?? '' })}>
                           수정
                         </button>
                         <button className="ml-1 text-[12px] text-muted hover:text-red-600" onClick={() => remove(r.entry!)}>
@@ -290,11 +429,7 @@ function ItemsTab({ rows, office, who, std, onCompare, toast }: { rows: Row[]; o
               <Field label="자재분류 (표준)">
                 <select className="input" value={form.stdCatId} onChange={(e) => setForm({ ...form, stdCatId: e.target.value })}>
                   <option value="">-</option>
-                  {std.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
+                  {stdOptions}
                 </select>
               </Field>
             </div>

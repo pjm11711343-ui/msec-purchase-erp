@@ -22,6 +22,8 @@ export interface CatItem {
   i: string; // 품명
   s: string; // 규격
   u: string; // 단위
+  ct?: string; // 계산서 분류 원문 (가장 많이 쓰인 것)
+  sc?: string; // 계산서 매핑 현장분류 id (가장 많이 쓰인 것)
   last: LastPrice; // 회사 전체 최신
   site: Record<string, LastPrice>; // 현장별 최신
 }
@@ -32,7 +34,7 @@ const PART = 600;
 const newer = (a: { m: string; d?: string; t: number }, b: { m: string; d?: string; t: number }) => a.m > b.m || (a.m === b.m && ((a.d ?? '') > (b.d ?? '') || ((a.d ?? '') === (b.d ?? '') && a.t > b.t)));
 
 export function buildCatalog(invoices: Invoice[], alias: Record<string, string>): CatItem[] {
-  type Acc = { names: Map<string, number>; units: Map<string, number>; last?: LastPrice & { t: number }; site: Record<string, LastPrice & { t: number }> };
+  type Acc = { names: Map<string, number>; units: Map<string, number>; cts: Map<string, number>; scs: Map<string, number>; last?: LastPrice & { t: number }; site: Record<string, LastPrice & { t: number }> };
   const m = new Map<string, Acc>();
   for (const inv of invoices) {
     if (inv.submitted && !inv.appliedToLedger) continue;
@@ -42,10 +44,13 @@ export function buildCatalog(invoices: Invoice[], alias: Record<string, string>)
       const spec = (l.spec || '').trim() === '0' ? '' : (l.spec || '').trim();
       const bk = baseKey(item, spec);
       const k = alias[bk] ?? bk;
-      const o: Acc = m.get(k) ?? { names: new Map(), units: new Map(), site: {} };
+      const o: Acc = m.get(k) ?? { names: new Map(), units: new Map(), cts: new Map(), scs: new Map(), site: {} };
       const nm = `${item}\u0001${spec}`;
       o.names.set(nm, (o.names.get(nm) ?? 0) + 1);
       if (l.unit) o.units.set(l.unit, (o.units.get(l.unit) ?? 0) + 1);
+      const ct = (l.categoryText ?? '').trim();
+      if (ct) o.cts.set(ct, (o.cts.get(ct) ?? 0) + 1);
+      if (l.siteCategoryId) o.scs.set(l.siteCategoryId, (o.scs.get(l.siteCategoryId) ?? 0) + 1);
       const q = lineQty(l);
       const p = Math.round(linePrice(l) || (q ? l.finalAmount / q : 0));
       if (p > 0) {
@@ -63,7 +68,9 @@ export function buildCatalog(invoices: Invoice[], alias: Record<string, string>)
   for (const [k, o] of m) {
     if (!o.last) continue; // 단가가 없는 품목은 목록에만 쓸 이유가 적어 뺀다
     const [i, s] = top(o.names).split('\u0001');
-    out.push({ k, i, s: s ?? '', u: top(o.units), last: strip(o.last), site: Object.fromEntries(Object.entries(o.site).map(([sid, v]) => [sid, strip(v)])) });
+    const ct = top(o.cts);
+    const sc = top(o.scs);
+    out.push({ k, i, s: s ?? '', u: top(o.units), ...(ct ? { ct } : {}), ...(sc ? { sc } : {}), last: strip(o.last), site: Object.fromEntries(Object.entries(o.site).map(([sid, v]) => [sid, strip(v)])) });
   }
   return out.sort((a, b) => a.i.localeCompare(b.i, 'ko') || a.s.localeCompare(b.s, 'ko'));
 }

@@ -73,6 +73,7 @@ export const C = {
   priceCache: 'erp_priceCache',
   reqAlias: 'erp_reqAlias',
   items: 'erp_items',
+  itemCats: 'erp_itemCats', // 품목별 자재분류(표준) 지정
   priceList: 'erp_priceList',
   vendorAccounts: 'erp_vendorAccounts',
   ledgerMeta: 'erp_ledgerMeta', // 월별 품목: itemAlias(품목 합치기), gipyo(집계표 금액)
