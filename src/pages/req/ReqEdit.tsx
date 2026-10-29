@@ -415,8 +415,17 @@ export default function ReqEdit() {
     return out.sort((a, b) => b.sc - a.sc).slice(0, 3).map(({ i, s }) => ({ i, s }));
   };
 
-  const addFromRows = (rows: Partial<ReqLine>[]) => {
+  const addFromRows = (rows0: Partial<ReqLine>[]) => {
     const nextCands: Record<string, { i: string; s: string }[]> = {};
+    // 엑셀의 거래선: 위·아래 같은 업체 사이의 빈칸(" 표시)은 같은 업체로
+    const rows = rows0.map((r) => ({ ...r }));
+    let last = -1;
+    rows.forEach((r, i) => {
+      const v = (r.vendorName ?? '').trim();
+      if (!v) return;
+      if (last >= 0 && nameKey(rows[last].vendorName ?? '') === nameKey(v)) for (let k = last + 1; k < i; k++) if (!(rows[k].vendorName ?? '').trim()) rows[k].vendorName = v;
+      last = i;
+    });
     const added = rows.map((r) => {
       const l = recognize({ ...newLine(), ...r } as ReqLine);
       if (l.srcItem && !l.aliasHit) nextCands[l.key] = suggestPairs(l.srcItem, l.srcSpec ?? '');
@@ -484,9 +493,55 @@ export default function ReqEdit() {
     .filter((c) => c[0]?.trim())
     .map((c) => ({ itemName: c[0].trim(), spec: (c[1] ?? '').trim(), unit: (c[2] ?? '').trim(), reqQty: num(c[3]), remark: (c[4] ?? '').trim() || undefined, location: (c[5] ?? '').trim() || undefined }));
 
-  const vendorOf = (vid?: string): Vendor | undefined => vendors.data.find((v) => v.id === vid);
   /** 거래선 목록: 등록된 업체 전부 (사용 중인 업체 먼저) */
   const vendorOptions = [...vendors.data].sort((a, b) => Number(a.active === false) - Number(b.active === false) || a.name.localeCompare(b.name, 'ko'));
+  const NONE = '(없음)';
+  const vLabel = (v: Vendor) => (v.active === false ? `${v.name} (사용 중지)` : v.name);
+  const vendorLabels = [NONE, ...vendorOptions.map(vLabel)];
+  const catLabels = [NONE, ...siteCats.map((c) => c.name)];
+
+  /**
+   * 첫 줄과 마지막 줄 값이 같으면 사이의 빈 줄도 같은 값으로 (엑셀 청구서의 " 표시처럼)
+   * - 방금 고른 줄 위·아래로 가장 가까운 값이 있는 줄을 찾아, 같은 값이면 그 사이 빈 줄을 채운다
+   */
+  const fillBetween = (lines: ReqLine[], idx: number, get: (l: ReqLine) => string, patch: Partial<ReqLine>, canEdit: (l: ReqLine) => boolean): ReqLine[] => {
+    const val = get(lines[idx]);
+    if (!val) return lines;
+    const out = [...lines];
+    const isBlank = (l: ReqLine) => !!l.itemName.trim() && !get(l);
+    for (const dir of [-1, 1]) {
+      let j = idx + dir;
+      while (j >= 0 && j < out.length && (isBlank(out[j]) || !out[j].itemName.trim())) j += dir;
+      if (j < 0 || j >= out.length || get(out[j]) !== val) continue;
+      for (let k = idx + dir; k !== j; k += dir) if (isBlank(out[k]) && canEdit(out[k])) out[k] = { ...out[k], ...patch };
+    }
+    return out;
+  };
+  const isLocked = (l: ReqLine) => !!d.id && d.status === 'pending' && !!ordered.get(`${d.id}|${l.key}`);
+  const pickVendor = (key: string, label: string) => {
+    const v = label === NONE ? undefined : vendorOptions.find((x) => vLabel(x) === label);
+    setD((x) => {
+      if (!x) return x;
+      const idx = x.lines.findIndex((l) => l.key === key);
+      if (idx < 0) return x;
+      const patch = { vendorId: v?.id, vendorName: v?.name };
+      let lines = x.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+      if (v) lines = fillBetween(lines, idx, (l) => l.vendorId ?? '', patch, (l) => !isLocked(l));
+      return { ...x, lines };
+    });
+  };
+  const pickCat = (key: string, label: string) => {
+    const c = label === NONE ? undefined : siteCats.find((x) => x.name === label);
+    setD((x) => {
+      if (!x) return x;
+      const idx = x.lines.findIndex((l) => l.key === key);
+      if (idx < 0) return x;
+      const patch = { siteCategoryId: c?.id };
+      let lines = x.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+      if (c) lines = fillBetween(lines, idx, (l) => l.siteCategoryId ?? '', patch, (l) => !isLocked(l));
+      return { ...x, lines };
+    });
+  };
   const catName = (cid?: string) => cats.data.find((c) => c.id === cid)?.name;
 
   /** 회사 청구서 양식(엑셀)으로 내려받기 */
@@ -906,22 +961,13 @@ export default function ReqEdit() {
                       <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
                       <td className="bg-amber-soft/40">
                         {rowOrderEd ? (
-                          <select
-                            className="input h-7 w-full px-1"
-                            value={l.vendorId ?? ''}
-                            onChange={(e) => {
-                              const v = vendorOf(e.target.value);
-                              setLine(l.key, { vendorId: v?.id, vendorName: v?.name });
-                            }}
-                          >
-                            <option value="">-</option>
-                            {vendorOptions.map((v) => (
-                              <option key={v.id} value={v.id}>
-                                {v.name}
-                                {v.active === false ? ' (사용 중지)' : ''}
-                              </option>
-                            ))}
-                          </select>
+                          <PickInput
+                            className="w-full"
+                            value={l.vendorName ?? ''}
+                            options={vendorLabels}
+                            placeholder="거래선 ▾"
+                            onPick={(label) => pickVendor(l.key, label)}
+                          />
                         ) : (
                           <span className="break-words">{l.vendorName}</span>
                         )}
@@ -932,14 +978,13 @@ export default function ReqEdit() {
                       </td>
                       <td>
                         {rowEd ? (
-                          <select className="input h-7 w-full px-1" value={l.siteCategoryId ?? ''} onChange={(e) => setLine(l.key, { siteCategoryId: e.target.value || undefined })}>
-                            <option value="">-</option>
-                            {siteCats.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
-                              </option>
-                            ))}
-                          </select>
+                          <PickInput
+                            className="w-full"
+                            value={catName(l.siteCategoryId) ?? ''}
+                            options={catLabels}
+                            placeholder="분류 ▾"
+                            onPick={(label) => pickCat(l.key, label)}
+                          />
                         ) : (
                           catName(l.siteCategoryId)
                         )}
