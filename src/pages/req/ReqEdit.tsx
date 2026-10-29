@@ -161,7 +161,10 @@ export default function ReqEdit() {
 
   if (!d) return <div className="text-muted">{reqs.loading || sites.loading ? '불러오는 중…' : '청구서를 찾을 수 없습니다.'}</div>;
 
-  const editable = !readOnly && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
+  // 작성중·반려: 작성자·자재부 / 결재 중(최종 승인 전): 작성자·자재부·결재선에 있는 사람도 내용 수정 가능
+  const draftEditable = !readOnly && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
+  const pendEditable = !readOnly && d.status === 'pending' && (d.createdBy === profile?.id || isOffice || d.steps.some((s) => s.userId && s.userId === profile?.id));
+  const editable = draftEditable || pendEditable;
   const myTurn = !!d.id && isMyTurn(d as Requisition, profile?.id, can('admin'));
   const orderEditable = editable ? isOffice : myTurn && isOffice;
   const dupDoc =
@@ -290,6 +293,31 @@ export default function ReqEdit() {
     const next = ceo ? -1 : nextActive(steps, j + 1);
     if (next < 0) return save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.');
     save({ steps, currentStep: next, currentApproverId: steps[next].userId }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.');
+  };
+
+  /** 결재 중 수정 저장: 결재 진행은 그대로 두고, 바뀐 내용을 진행 기록에 남긴다 */
+  const savePending = () => {
+    if (!d.lines.some((l) => l.itemName.trim())) return toast('품목을 한 줄 이상 입력하세요.', 'err');
+    const wrong = d.lines.filter(invalidLine);
+    if (wrong.length) return toast(`목록에 없는 품명·규격이 ${wrong.length}줄 있습니다 (빨간 칸). 목록에서 다시 고르세요.`, 'err');
+    const before = reqs.data.find((r) => r.id === d.id);
+    const old = new Map((before?.lines ?? []).filter((l) => l.itemName).map((l) => [l.key, l]));
+    const now = d.lines.filter((l) => l.itemName.trim());
+    const parts: string[] = [];
+    const added = now.filter((l) => !old.has(l.key));
+    const removed = [...old.values()].filter((l) => !now.some((x) => x.key === l.key));
+    const changed = now.filter((l) => {
+      const o = old.get(l.key);
+      return o && (o.itemName !== l.itemName || o.spec !== l.spec || o.reqQty !== l.reqQty || (o.orderQty || 0) !== (l.orderQty || 0) || (o.orderPrice || 0) !== (l.orderPrice || 0) || (o.vendorId || '') !== (l.vendorId || ''));
+    });
+    const nm = (l: ReqLine) => `${l.itemName} ${l.spec}`.trim();
+    if (added.length) parts.push(`추가 ${added.length}줄(${added.slice(0, 3).map(nm).join(', ')}${added.length > 3 ? ' …' : ''})`);
+    if (removed.length) parts.push(`삭제 ${removed.length}줄(${removed.slice(0, 3).map(nm).join(', ')}${removed.length > 3 ? ' …' : ''})`);
+    if (changed.length) parts.push(`변경 ${changed.length}줄(${changed.slice(0, 3).map(nm).join(', ')}${changed.length > 3 ? ' …' : ''})`);
+    if (before && (before.purpose ?? '') !== (d.purpose ?? '')) parts.push('사용 목적');
+    if (before && (before.docNo !== d.docNo || before.requestDate !== d.requestDate)) parts.push('결의번호·청구일');
+    const summary = parts.join(' · ');
+    save({}, summary ? `결재 중 수정: ${summary}` : '결재 중 저장', '수정 내용을 저장했습니다. 결재는 그대로 진행됩니다.');
   };
 
   const reopen = () =>
@@ -427,12 +455,17 @@ export default function ReqEdit() {
                 엑셀 다운로드
               </button>
             )}
-            {(editable || can('admin')) && d.id && (
+            {(draftEditable || can('admin')) && d.id && (
               <button className="btn-danger" onClick={remove}>
                 삭제
               </button>
             )}
-            {editable && (
+            {pendEditable && (
+              <button className="btn-primary" disabled={busy} onClick={savePending}>
+                수정 저장
+              </button>
+            )}
+            {draftEditable && (
               <>
                 <button className="btn-ghost" disabled={busy} onClick={() => save({}, '임시 저장', '저장했습니다.')}>
                   임시 저장
@@ -442,7 +475,7 @@ export default function ReqEdit() {
                 </button>
               </>
             )}
-            {myTurn && orderEditable && (
+            {myTurn && orderEditable && !pendEditable && (
               <button className="btn-ghost" disabled={busy} onClick={() => save({}, '발주 결의 수정', '저장했습니다.')}>
                 발주 결의 저장
               </button>
@@ -456,6 +489,11 @@ export default function ReqEdit() {
         }
       />
 
+      {pendEditable && (
+        <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12.5px] text-sky-800">
+          결재 중인 청구서입니다. 최종 승인(대표) 전까지 품목·수량·단가 등을 고친 뒤 <b>수정 저장</b>하면 결재는 그대로 이어지고, 바뀐 내용은 진행 기록에 남습니다. 결재선은 바꿀 수 없고, 이미 발주된 줄은 잠겨 있습니다.
+        </div>
+      )}
       {d.status === 'pending' && preOrdered.length > 0 && (
         <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[12.5px] text-violet-800">
           결재 중이지만 자재부가 먼저 발주(선발주)한 줄이 {preOrdered.length}개 있습니다: {[...new Set(preOrdered.map((p) => p.poNo))].join(', ')}
@@ -467,7 +505,7 @@ export default function ReqEdit() {
             <select
               className="input"
               value={d.siteId}
-              disabled={!editable || !!d.id}
+              disabled={!draftEditable || !!d.id}
               onChange={(e) => {
                 const s = sites.data.find((x) => x.id === e.target.value);
                 const def = defaultSteps(e.target.value);
@@ -506,7 +544,7 @@ export default function ReqEdit() {
             <select
               className="input h-7"
               value={d.approvalType}
-              disabled={!editable}
+              disabled={!draftEditable}
               onChange={(e) => {
                 const type = e.target.value as Requisition['approvalType'];
                 setD({ ...d, approvalType: type, steps: TEMPLATES[type].map((label) => ({ label })) });
@@ -515,7 +553,7 @@ export default function ReqEdit() {
               <option>2단계</option>
               <option>6칸</option>
             </select>
-            {editable && (
+            {draftEditable && (
               <button className="text-[12px] text-muted hover:text-ink" onClick={() => setD({ ...d, ...(({ type, steps }) => ({ approvalType: type, steps }))(defaultSteps(d.siteId)) })}>
                 현장 기본값으로
               </button>
@@ -531,7 +569,7 @@ export default function ReqEdit() {
                   {i + 1}. {s.label}
                   {s.result === 'skipped' ? ' · 미지정(건너뜀)' : s.result && ` · ${s.result === 'approved' ? '승인' : '반려'} ${s.at ? new Date(s.at).toLocaleDateString('ko-KR') : ''}`}
                 </div>
-                {editable ? (
+                {draftEditable ? (
                   <select
                     className="input mt-0.5 h-7 w-full"
                     value={s.userId ?? ''}
@@ -595,7 +633,7 @@ export default function ReqEdit() {
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, newLine()] })}>
                 + 줄 추가
               </button>
-              {(isOffice || sites.data.find((s) => s.id === d.siteId)?.allowReqExcel) && (
+              {draftEditable && (isOffice || sites.data.find((s) => s.id === d.siteId)?.allowReqExcel) && (
                 <>
                   <button className="btn-ghost h-7 text-[12px]" onClick={() => setPasteOpen(true)}>
                     엑셀 붙여넣기
@@ -674,12 +712,16 @@ export default function ReqEdit() {
               <tbody>
                 {d.lines.map((l, i) => {
                   const pq = priorOf(l);
+                  // 이미 발주(선발주)된 줄은 고칠 수 없음
+                  const locked = !!d.id && d.status === 'pending' && !!ordered.get(`${d.id}|${l.key}`);
+                  const rowEd = editable && !locked;
+                  const rowOrderEd = orderEditable && !locked;
                   const remain = l.execQty ? l.execQty - pq - l.reqQty : null;
                   return (
                     <tr key={l.key} className="align-top">
 <td className="pt-2 text-muted">{i + 1}</td>
                       <td>
-                        {editable ? (
+                        {rowEd ? (
                           <PickInput
                             className="w-full"
                             value={l.itemName}
@@ -693,7 +735,7 @@ export default function ReqEdit() {
                         )}
                       </td>
                       <td>
-                        {editable ? (
+                        {rowEd ? (
                           <PickInput
                             className="w-full"
                             value={l.spec}
@@ -707,8 +749,8 @@ export default function ReqEdit() {
                         )}
                       </td>
                       <td>
-                        {T(l.key, 'unit', l.unit, editable, 'w-full', { list: `unit-${l.key}` })}
-                        {editable && (
+                        {T(l.key, 'unit', l.unit, rowEd, 'w-full', { list: `unit-${l.key}` })}
+                        {rowEd && (
                           <datalist id={`unit-${l.key}`}>
                             {unitOptions(l.itemName, l.spec).map((x) => (
                               <option key={x} value={x} />
@@ -716,19 +758,19 @@ export default function ReqEdit() {
                           </datalist>
                         )}
                       </td>
-                                            <td className="num">{N(l.key, 'contractQty', l.contractQty, editable, 'w-full')}</td>
-                      <td className="num">{N(l.key, 'contractPrice', l.contractPrice, editable, 'w-full')}</td>
-                      <td className="num">{N(l.key, 'execQty', l.execQty, editable, 'w-full')}</td>
+                                            <td className="num">{N(l.key, 'contractQty', l.contractQty, rowEd, 'w-full')}</td>
+                      <td className="num">{N(l.key, 'contractPrice', l.contractPrice, rowEd, 'w-full')}</td>
+                      <td className="num">{N(l.key, 'execQty', l.execQty, rowEd, 'w-full')}</td>
                       <td className="num pt-2 text-muted" title={l.priorQtyManual != null ? '엑셀에서 받은 값' : '이전 승인 청구 합계'}>
                         {pq ? pq.toLocaleString() : ''}
                       </td>
-<td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, editable, 'w-full')}</td>
-                                            <td>{T(l.key, 'note', l.note, editable, 'w-full')}</td>
-<td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, orderEditable, 'w-full')}</td>
+<td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, rowEd, 'w-full')}</td>
+                                            <td>{T(l.key, 'note', l.note, rowEd, 'w-full')}</td>
+<td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, rowOrderEd, 'w-full')}</td>
                       <td className="num bg-amber-soft/40">
                         <div className="flex items-center justify-end gap-0.5">
-                          {N(l.key, 'orderPrice', l.orderPrice, orderEditable, 'w-full min-w-0')}
-                          {orderEditable && l.itemName && (
+                          {N(l.key, 'orderPrice', l.orderPrice, rowOrderEd, 'w-full min-w-0')}
+                          {rowOrderEd && l.itemName && (
                             <button className="shrink-0 text-[11px] text-amber-700 hover:underline" onClick={() => setPriceFor(l.key)} title="단가 후보 보기">
                               ▾
                             </button>
@@ -738,7 +780,7 @@ export default function ReqEdit() {
                       </td>
                       <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
                       <td className="bg-amber-soft/40">
-                        {orderEditable ? (
+                        {rowOrderEd ? (
                           <select
                             className="input h-7 w-full px-1"
                             value={l.vendorId ?? ''}
@@ -760,19 +802,19 @@ export default function ReqEdit() {
                           <span className="break-words">{l.vendorName}</span>
                         )}
                       </td>
-                                            <td>{T(l.key, 'remark', l.remark, editable, 'w-full')}</td>
+                                            <td>{T(l.key, 'remark', l.remark, rowEd, 'w-full')}</td>
 <td>
                         <div className="flex flex-col gap-0.5">
-                          {editable ? (
+                          {rowEd ? (
                             <input type="date" className="input h-7 w-full px-1 text-[11.5px]" value={l.dueDate ?? ''} onChange={(e) => setLine(l.key, { dueDate: e.target.value || undefined })} />
                           ) : (
                             <span>{l.dueDate}</span>
                           )}
-                          {T(l.key, 'location', l.location, editable, 'w-full', { placeholder: '사용 위치·공정' })}
+                          {T(l.key, 'location', l.location, rowEd, 'w-full', { placeholder: '사용 위치·공정' })}
                         </div>
                       </td>
                       <td>
-                        {editable ? (
+                        {rowEd ? (
                           <select className="input h-7 w-full px-1" value={l.siteCategoryId ?? ''} onChange={(e) => setLine(l.key, { siteCategoryId: e.target.value || undefined })}>
                             <option value="">-</option>
                             {siteCats.map((c) => (
@@ -792,7 +834,7 @@ export default function ReqEdit() {
                             {ordered.get(`${d.id}|${l.key}`)!.poNo.slice(-9)}
                           </Link>
                         )}
-                        {editable && (
+                        {rowEd && (
                           <button className="text-muted hover:text-red-600" onClick={() => setD({ ...d, lines: d.lines.filter((x) => x.key !== l.key) })} aria-label="줄 삭제">
                             ✕
                           </button>
