@@ -16,7 +16,7 @@ import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList
 import PickInput from '../../components/PickInput';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
 import { normItem, normSpec } from '../../lib/itemNorm';
-import { reqSummary, type ReqSummary } from '../../lib/reqSummary';
+import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { signMap } from '../../lib/sign';
 import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
 import { similarity } from '../../lib/catMatch';
@@ -1216,8 +1216,11 @@ export default function ReqEdit() {
 /** 하단 요약: 자재분류별 계약·변경(예상)·실행·기반입·금회청구 + 업체별 금회청구 */
 function SummaryPanel({ sum }: { sum: ReqSummary }) {
   const [all, setAll] = useState(false);
-  const onlyCur = !all;
+  // 자재분류가 지정된 금회청구 줄이 하나도 없으면 전체 분류를 보여준다
+  const hasCatCur = sum.rows.some((r) => r.current && r.id !== NO_CAT);
+  const onlyCur = !all && hasCatCur;
   const rows = onlyCur ? sum.rows.filter((r) => r.current) : sum.rows;
+  const realCats = sum.rows.filter((r) => r.id !== NO_CAT).length;
   const f = (v: number) => (v ? won(v) : '');
   const remain = (r: { exec: number; change: number; prior: number; current: number }) => (r.exec ? r.exec - r.prior - r.current : 0);
   return (
@@ -1225,12 +1228,16 @@ function SummaryPanel({ sum }: { sum: ReqSummary }) {
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5">
         <span className="font-semibold text-navy-950">자재분류 · 금회청구 업체별 금액</span>
         <span className="text-[12px] text-muted">기반입금액 = 이 청구서보다 먼저 올린 이 현장 청구서의 발주 금액 (발주된 줄은 발주서 금액)</span>
-        <button className="btn-ghost ml-auto h-7 text-[12px]" onClick={() => setAll(!all)}>
-          {all ? '청구 분류만 보기' : `전체 보기 (${sum.rows.length}개 분류)`}
-        </button>
+        {hasCatCur ? (
+          <button className="btn-ghost ml-auto h-7 text-[12px]" onClick={() => setAll(!all)}>
+            {all ? '청구 분류만 보기' : `전체 보기 (${sum.rows.length}개 분류)`}
+          </button>
+        ) : (
+          <span className="ml-auto text-[12px] text-amber-700">청구 줄에 자재분류가 아직 없어 전체 분류를 보여줍니다</span>
+        )}
       </div>
       {!rows.length ? (
-        <Empty>현장 투입집계 분류가 없습니다. 기준정보 › 분류에서 현장 분류를 등록하세요.</Empty>
+        <Empty>{realCats ? '표시할 분류가 없습니다.' : '이 현장에 등록된 투입집계 분류가 없습니다. 기준정보 › 분류에서 현장 분류를 등록하세요.'}</Empty>
       ) : (
         <div className="overflow-x-auto">
           <table className="tbl text-[12px]">
