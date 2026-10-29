@@ -219,6 +219,9 @@ export interface Requisition {
   submittedAt?: number;
   approvedAt?: number;
   history: { at: number; by: string; action: string; comment?: string }[];
+  deletedAt?: number; // 휴지통으로 옮긴 시각 (있으면 목록·집계에서 빠짐)
+  deletedBy?: string;
+  deletedByName?: string;
 }
 
 /* ───────── 3단계: 발주 ───────── */

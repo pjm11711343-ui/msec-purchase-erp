@@ -8,7 +8,7 @@ import { fillReqForm } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
-import { bonText, lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
+import { bonText, lastOrderPrice, lineAmount, restoreReq, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
 import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
@@ -54,7 +54,8 @@ export default function ReqEdit() {
   const [priceFor, setPriceFor] = useState<string | null>(null); // 단가 후보 보기 (line key)
 
   const isNew = !id || id === 'new';
-  const stored = reqs.data.find((r) => r.id === id);
+  const stored = reqs.data.find((r) => r.id === id) ?? reqs.trash.find((r) => r.id === id);
+  const inTrash = !!stored?.deletedAt;
   const isOffice = can('admin', 'material');
 
   // 처음 불러오기
@@ -162,8 +163,8 @@ export default function ReqEdit() {
   if (!d) return <div className="text-muted">{reqs.loading || sites.loading ? '불러오는 중…' : '청구서를 찾을 수 없습니다.'}</div>;
 
   // 작성중·반려: 작성자·자재부 / 결재 중(최종 승인 전): 작성자·자재부·결재선에 있는 사람도 내용 수정 가능
-  const draftEditable = !readOnly && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
-  const pendEditable = !readOnly && d.status === 'pending' && (d.createdBy === profile?.id || isOffice || d.steps.some((s) => s.userId && s.userId === profile?.id));
+  const draftEditable = !readOnly && !inTrash && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
+  const pendEditable = !readOnly && !inTrash && d.status === 'pending' && (d.createdBy === profile?.id || isOffice || d.steps.some((s) => s.userId && s.userId === profile?.id));
   const editable = draftEditable || pendEditable;
   const myTurn = !!d.id && isMyTurn(d as Requisition, profile?.id, can('admin'));
   const orderEditable = editable ? isOffice : myTurn && isOffice;
@@ -325,12 +326,24 @@ export default function ReqEdit() {
       ? toast(`이미 선발주된 줄이 있어 회수할 수 없습니다 (${[...new Set(preOrdered.map((p) => p.poNo))].join(', ')}). 자재부에 문의하세요.`, 'err')
       : save({ status: 'draft', currentStep: 0, currentApproverId: undefined, steps: d.steps.map((s) => ({ label: s.label, userId: s.userId, userName: s.userName })) }, '다시 작성', '작성중으로 돌렸습니다.');
 
+  /** 삭제 = 휴지통으로 (구매청구 › 휴지통에서 복원·영구 삭제) */
   const remove = async () => {
-    if (!d.id || !confirm('이 청구서를 삭제할까요?')) return;
+    if (!d.id) return;
+    const done = d.lines.filter((l) => ordered.get(`${d.id}|${l.key}`));
+    if (done.length) return toast(`이미 발주된 줄이 ${done.length}개 있어 삭제할 수 없습니다. 발주를 먼저 취소하세요.`, 'err');
+    if (!confirm('이 청구서를 휴지통으로 옮길까요? 구매청구 › 휴지통에서 다시 복원할 수 있습니다.')) return;
     try {
-      await commitBatch([{ type: 'delete', col: C.requisitions, id: d.id }]);
-      await audit('구매청구 삭제', d.id, { docNo: d.docNo });
-      toast('삭제했습니다.');
+      const now = Date.now();
+      await commitBatch([
+        {
+          type: 'set',
+          col: C.requisitions,
+          id: d.id,
+          data: { deletedAt: now, deletedBy: profile?.id ?? '', deletedByName: profile?.name ?? '', history: [...d.history, { at: now, by: profile?.name ?? '', action: '휴지통으로 이동' }] },
+        },
+      ]);
+      await audit('구매청구 휴지통 이동', d.id, { docNo: d.docNo });
+      toast('휴지통으로 옮겼습니다.');
       nav('/req');
     } catch (e) {
       toast(errMsg(e), 'err');
@@ -491,6 +504,16 @@ export default function ReqEdit() {
         }
       />
 
+      {inTrash && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-800">
+          휴지통에 있는 청구서입니다 ({stored?.deletedByName} · {stored?.deletedAt ? new Date(stored.deletedAt).toLocaleString('ko-KR') : ''}). 목록·기반입·집계에서 빠져 있습니다.
+          {!readOnly && (stored?.deletedBy === profile?.id || isOffice) && (
+            <button className="btn-ghost ml-auto h-7 text-[12px]" disabled={busy} onClick={() => stored && restoreReq(stored, profile?.name ?? '').then(() => toast('복원했습니다.'), (e) => toast(errMsg(e), 'err'))}>
+              복원
+            </button>
+          )}
+        </div>
+      )}
       {pendEditable && (
         <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12.5px] text-sky-800">
           결재 중인 청구서입니다. 최종 승인(대표) 전까지 품목·수량·단가 등을 고친 뒤 <b>수정 저장</b>하면 결재는 그대로 이어지고, 바뀐 내용은 진행 기록에 남습니다. 결재선은 바꿀 수 없고, 이미 발주된 줄은 잠겨 있습니다.

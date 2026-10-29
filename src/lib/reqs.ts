@@ -1,6 +1,6 @@
-import { orderBy } from 'firebase/firestore';
+import { deleteField, orderBy } from 'firebase/firestore';
 import { useAuth } from '../auth/AuthContext';
-import { useCollection, useSiteScoped } from './db';
+import { commitBatch, useCollection, useSiteScoped } from './db';
 import { C } from './firebase';
 import { priceKey } from './prices';
 import type { ApprovalLine, ErpUser, ReqLine, Requisition } from '../types';
@@ -10,8 +10,11 @@ export function useRequisitions() {
   const all = useCollection<Requisition>(C.requisitions, [orderBy('createdAt', 'desc')], '', siteIds === null);
   const scoped = useSiteScoped<Requisition>(C.requisitions, siteIds === null ? [] : siteIds);
   const src = siteIds === null ? all : scoped;
-  const data = [...src.data].sort((a, b) => b.createdAt - a.createdAt);
-  return { ...src, data };
+  const sorted = [...src.data].sort((a, b) => b.createdAt - a.createdAt);
+  // 휴지통에 있는 청구서는 목록·기반입·집계에서 뺀다
+  const data = sorted.filter((r) => !r.deletedAt);
+  const trash = sorted.filter((r) => r.deletedAt).sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+  return { ...src, data, trash };
 }
 
 export function useApprovalLines() {
@@ -69,3 +72,15 @@ export function newLine(): ReqLine {
 }
 
 export { bonNote, bonText, pipeLength } from './pipe';
+
+/** 휴지통에서 복원 */
+export async function restoreReq(r: Requisition, who: string) {
+  await commitBatch([
+    { type: 'set', col: C.requisitions, id: r.id, data: { deletedAt: deleteField(), deletedBy: deleteField(), deletedByName: deleteField(), history: [...r.history, { at: Date.now(), by: who, action: '휴지통에서 복원' }] } },
+  ]);
+}
+
+/** 휴지통에서 영구 삭제 (관리자) */
+export async function purgeReq(r: Requisition) {
+  await commitBatch([{ type: 'delete', col: C.requisitions, id: r.id }]);
+}

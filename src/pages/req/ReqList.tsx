@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { useSites } from '../../lib/hooks';
-import { useRequisitions } from '../../lib/reqs';
+import { purgeReq, restoreReq, useRequisitions } from '../../lib/reqs';
+import { audit } from '../../lib/db';
 import { won } from '../../lib/normalize';
-import { Empty, PageHeader } from '../../components/ui';
+import { Empty, errMsg, PageHeader, useToast } from '../../components/ui';
 import { REQ_STATUS_LABEL, type ReqStatus, type Requisition } from '../../types';
 
 const STATUS_COLOR: Record<ReqStatus, string> = {
@@ -49,8 +50,10 @@ export function isMyTurn(r: Requisition, uid?: string, isAdmin?: boolean) {
 export default function ReqList() {
   const { profile, can, readOnly } = useAuth();
   const reqs = useRequisitions();
+  const toast = useToast();
   const sites = useSites();
-  const [tab, setTab] = useState<'inbox' | 'mine' | 'all'>('all');
+  const [tab, setTab] = useState<'inbox' | 'mine' | 'all' | 'trash'>('all');
+  const [busyId, setBusyId] = useState('');
   const [site, setSite] = useState('');
   const [status, setStatus] = useState<'' | ReqStatus>('');
   const [q, setQ] = useState('');
@@ -64,6 +67,13 @@ export default function ReqList() {
     if (k) l = l.filter((r) => [r.docNo, r.siteName, r.createdByName, r.purpose, ...r.lines.map((x) => x.itemName)].join(' ').toLowerCase().includes(k));
     return l;
   }, [tab, inbox, reqs.data, site, status, q, profile?.id]);
+  const trashShown = useMemo(() => {
+    let l = reqs.trash;
+    if (site) l = l.filter((r) => r.siteId === site);
+    const k = q.trim().toLowerCase();
+    if (k) l = l.filter((r) => [r.docNo, r.siteName, r.createdByName, r.deletedByName, r.purpose, ...r.lines.map((x) => x.itemName)].join(' ').toLowerCase().includes(k));
+    return l;
+  }, [reqs.trash, site, q]);
 
   const Tab = ({ id, label, n }: { id: typeof tab; label: string; n?: number }) => (
     <button
@@ -93,6 +103,7 @@ export default function ReqList() {
           <Tab id="all" label="전체" />
           <Tab id="inbox" label="결재함" n={inbox.length} />
           <Tab id="mine" label="내가 쓴 청구" />
+          <Tab id="trash" label={`휴지통${reqs.trash.length ? ` ${reqs.trash.length}` : ''}`} />
           <div className="ml-auto flex flex-wrap gap-2">
             <select className="input h-7" value={site} onChange={(e) => setSite(e.target.value)}>
               <option value="">전체 현장</option>
@@ -113,7 +124,97 @@ export default function ReqList() {
             <input className="input h-7 w-48" placeholder="결의번호·품명 검색" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
-        {!shown.length ? (
+        {tab === 'trash' ? (
+          !trashShown.length ? (
+            <Empty>휴지통이 비어 있습니다. 청구서를 삭제하면 여기로 옮겨지고, 다시 복원할 수 있습니다.</Empty>
+          ) : (
+            <div className="max-h-[calc(100vh-220px)] overflow-auto">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>삭제일</th>
+                    <th>삭제한 사람</th>
+                    <th>청구일</th>
+                    <th>결의번호</th>
+                    <th>현장</th>
+                    <th>품목</th>
+                    <th className="num">금액</th>
+                    <th>삭제 전 상태</th>
+                    <th>작성자</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trashShown.map((r) => (
+                    <tr key={r.id} className="text-muted">
+                      <td className="whitespace-nowrap">{r.deletedAt ? new Date(r.deletedAt).toLocaleString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</td>
+                      <td>{r.deletedByName}</td>
+                      <td className="whitespace-nowrap">{r.requestDate}</td>
+                      <td>
+                        <Link to={`/req/${r.id}`} className="font-semibold text-navy-900 hover:underline">
+                          {r.docNo || '(번호 없음)'}
+                        </Link>
+                      </td>
+                      <td>{r.siteName}</td>
+                      <td className="max-w-[260px] truncate">
+                        {r.lines[0]?.itemName}
+                        {r.lines.length > 1 && ` 외 ${r.lines.length - 1}건`}
+                      </td>
+                      <td className="num">{won(r.totalAmount)}</td>
+                      <td>
+                        <StatusChip s={r.status} />
+                      </td>
+                      <td>{r.createdByName}</td>
+                      <td className="whitespace-nowrap text-right">
+                        {!readOnly && (r.deletedBy === profile?.id || can('admin', 'material')) && (
+                          <button
+                            className="btn-ghost h-7 text-[12px]"
+                            disabled={busyId === r.id}
+                            onClick={async () => {
+                              setBusyId(r.id);
+                              try {
+                                await restoreReq(r, profile?.name ?? '');
+                                await audit('구매청구 복원', r.id, { docNo: r.docNo });
+                                toast('복원했습니다.');
+                              } catch (e) {
+                                toast(errMsg(e), 'err');
+                              } finally {
+                                setBusyId('');
+                              }
+                            }}
+                          >
+                            복원
+                          </button>
+                        )}
+                        {can('admin') && (
+                          <button
+                            className="ml-1 h-7 px-2 text-[12px] text-red-600 hover:underline"
+                            disabled={busyId === r.id}
+                            onClick={async () => {
+                              if (!confirm(`${r.siteName} ${r.docNo || r.requestDate} 청구서를 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return;
+                              setBusyId(r.id);
+                              try {
+                                await purgeReq(r);
+                                await audit('구매청구 영구 삭제', r.id, { docNo: r.docNo });
+                                toast('영구 삭제했습니다.');
+                              } catch (e) {
+                                toast(errMsg(e), 'err');
+                              } finally {
+                                setBusyId('');
+                              }
+                            }}
+                          >
+                            영구 삭제
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : !shown.length ? (
           <Empty>{reqs.loading ? '불러오는 중…' : tab === 'inbox' ? '결재할 청구서가 없습니다.' : '청구서가 없습니다.'}</Empty>
         ) : (
           <div className="max-h-[calc(100vh-220px)] overflow-auto">
