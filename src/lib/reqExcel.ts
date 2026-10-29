@@ -80,7 +80,7 @@ export function exportReq(req: Requisition, catName: (id?: string) => string | u
   r4[20] = `청구일 ${req.requestDate}`;
   aoa.push(r4);
   const h1 = blank();
-  Object.assign(h1, { 1: '품  명', 2: '규  격', 3: '단위', 4: '계약내역량', 6: '실 행 량', 7: '청 구 및 반 입 수 량', 9: '본 / (비고)', 10: '발   주   결   의 (본사 작성분)', 17: '거래선', 19: '비    고', 24: '실행물량 잔여수량', 25: '기반입+금회청구 수량', 26: '기반입 총금액', 27: '실행잔여 총금액', 28: '희망 납기일', 29: '사용 위치/공정' });
+  Object.assign(h1, { 1: '품  명', 2: '규  격', 3: '단위', 4: '계약내역량', 6: '실 행 량', 7: '청 구 및 반 입 수 량', 9: '본 / (비고)', 10: '발   주   결   의 (본사 작성분)', 17: '거래선', 19: '비    고', 24: '실행물량 잔여수량', 25: '기반입+금회청구 수량', 26: '기반입 총금액', 27: '실행잔여 총금액', 28: '사용 위치/공정' });
   const h2 = blank();
   Object.assign(h2, { 4: '수량', 5: '단가', 7: '기반입', 8: '금회청구', 10: '발주수량', 13: '단   가', 15: '금   액' });
   aoa.push(h1, h2);
@@ -112,8 +112,7 @@ export function exportReq(req: Requisition, catName: (id?: string) => string | u
       25: prior + l.reqQty,
       26: prior * l.orderPrice || null,
       27: l.execQty ? (l.execQty - prior - l.reqQty) * l.orderPrice : null,
-      28: l.dueDate ?? null,
-      29: l.location ?? null,
+      28: l.location ?? null,
     });
     aoa.push(r);
   }
@@ -126,7 +125,7 @@ export function exportReq(req: Requisition, catName: (id?: string) => string | u
   req.steps.forEach((st, i) => (sign[3 + i * 2] = `${st.label}: ${st.userName ?? ''} ${st.result === 'approved' ? '승인' : st.result === 'rejected' ? '반려' : ''}`.trim()));
   aoa.push(sign);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = Array.from({ length: 30 }, (_, i) => ({ wch: [0, 0, 1, 2].includes(i) ? (i === 1 ? 28 : i === 2 ? 16 : 6) : i === 19 ? 30 : 10 }));
+  ws['!cols'] = Array.from({ length: 29 }, (_, i) => ({ wch: [0, 0, 1, 2].includes(i) ? (i === 1 ? 28 : i === 2 ? 16 : 6) : i === 19 ? 30 : 10 }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '청구서');
   XLSX.writeFile(wb, `구매청구서_${req.siteName}_${req.docNo || req.requestDate}.xlsx`);

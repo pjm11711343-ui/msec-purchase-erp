@@ -412,7 +412,6 @@ export default function PoList() {
                               <th className="num">발주수량</th>
                               <th className="num">단가</th>
                               <th className="num">금액</th>
-                              <th>희망납기</th>
                               <th>비고</th>
                               <th>거래선</th>
                             </tr>
@@ -441,7 +440,6 @@ export default function PoList() {
                                   <td className="num">{qty.toLocaleString()}</td>
                                   <td className={`num ${p.line.orderPrice ? '' : 'text-amber-700'}`}>{p.line.orderPrice ? won(p.line.orderPrice) : '단가 없음'}</td>
                                   <td className="num">{won(qty * (p.line.orderPrice || 0))}</td>
-                                  <td className="whitespace-nowrap">{p.line.dueDate}</td>
                                   <td className="text-muted">{[p.line.location, p.line.remark].filter(Boolean).join(' · ')}</td>
                                   <td>
                                     <select

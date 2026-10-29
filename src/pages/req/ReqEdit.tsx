@@ -688,11 +688,7 @@ export default function ReqEdit() {
                   <th colSpan={3} className="bg-amber-soft text-center">발주 결의 (본사 작성분)</th>
                   <th rowSpan={2} className="bg-amber-soft text-center">거래선</th>
                   <th rowSpan={2} className="text-center">비 고</th>
-                  <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">
-                    희망납기
-                    <br />
-                    사용 위치·공정
-                  </th>
+                  <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">사용 위치·공정</th>
                   <th rowSpan={2} className="bg-[#eef1f6] text-center">자재분류</th>
                   <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">
                     실행
@@ -808,14 +804,7 @@ export default function ReqEdit() {
                       </td>
                                             <td>{T(l.key, 'remark', l.remark, rowEd, 'w-full')}</td>
 <td>
-                        <div className="flex flex-col gap-0.5">
-                          {rowEd ? (
-                            <input type="date" className="input h-7 w-full px-1 text-[11.5px]" value={l.dueDate ?? ''} onChange={(e) => setLine(l.key, { dueDate: e.target.value || undefined })} />
-                          ) : (
-                            <span>{l.dueDate}</span>
-                          )}
-                          {T(l.key, 'location', l.location, rowEd, 'w-full', { placeholder: '사용 위치·공정' })}
-                        </div>
+                        {T(l.key, 'location', l.location, rowEd, 'w-full', { placeholder: '사용 위치·공정' })}
                       </td>
                       <td>
                         {rowEd ? (

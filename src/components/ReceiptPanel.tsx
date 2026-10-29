@@ -203,7 +203,6 @@ export default function ReceiptPanel({ po, receipts, prices = [] }: { po: Purcha
             <th className="num">입고 누계</th>
             <th className="num">남은 수량</th>
             <th className="num">이번 입고</th>
-            <th>희망납기</th>
           </tr>
         </thead>
         <tbody>
@@ -297,7 +296,6 @@ export default function ReceiptPanel({ po, receipts, prices = [] }: { po: Purcha
                   />
                 )}
               </td>
-              <td className="whitespace-nowrap text-muted">{r.l.dueDate}</td>
             </tr>
           ))}
         </tbody>
