@@ -272,6 +272,7 @@ export interface PurchaseOrder {
   orderedByName: string; // 발주 담당자 (이름 직급)
   signNames: { label: string; name?: string }[]; // 결재란 (청구서 결재선에서)
   preOrder?: boolean; // 선발주: 청구서 결재가 끝나기 전에 발주 (자재부·관리자)
+  revisedAt?: number; // 발주 수정 시각 (업체가 다시 확인해야 함)
   createdAt: number;
   sentAt?: number;
   cancelledAt?: number;

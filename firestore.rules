@@ -115,7 +115,7 @@ service cloud.firestore {
         || (hasSite(resource.data.siteId)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirmed', 'confirmedByName', 'confirmedAt']));
       allow delete: if isOffice()
-        || (isVendor() && resource.data.enteredBy == request.auth.uid && resource.data.get('confirmed', false) == false);
+        || (isVendor() && resource.data.enteredBy == request.auth.uid && resource.data.vendorId == myVendor());
     }
     // 업체 단가 기입(빈 단가)·변경 요청. 발주서 반영은 사내(자재부·관리자)가 한다
     function vendorPriceOk(id) {

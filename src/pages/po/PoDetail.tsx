@@ -7,11 +7,13 @@ import { C } from '../../lib/firebase';
 import { useSites } from '../../lib/hooks';
 import { won } from '../../lib/normalize';
 import { preOrderState, usePurchaseOrders } from '../../lib/pos';
+import { poLineKey, receivedMap, useReceipts } from '../../lib/receipts';
+import { num } from '../../lib/normalize';
 import { usePoPrices } from '../../lib/poPrices';
 import { useRequisitions } from '../../lib/reqs';
-import { errMsg, useToast } from '../../components/ui';
+import { commaText, errMsg, useToast } from '../../components/ui';
 import { PoChip, PreChip } from './PoList';
-import type { PurchaseOrder, Site } from '../../types';
+import type { PoLine, PurchaseOrder, Site } from '../../types';
 
 export const MIN_ROWS = 18;
 
@@ -51,6 +53,10 @@ export default function PoDetail() {
   const [internal, setInternal] = useState(false);
   const [showPrice, setShowPrice] = useState(true);
   const [edit, setEdit] = useState<{ deliveryTerm: string; notice: string; memo: string } | null>(null);
+  const receipts = useReceipts();
+  const rec = receivedMap(receipts.data);
+  // 발주 수정: 줄별 수량·단가·비고 / 지울 줄
+  const [lineEdit, setLineEdit] = useState<{ rows: { l: PoLine; qty: string; price: string; remark: string; del: boolean }[] } | null>(null);
 
   useEffect(() => {
     if (po) document.title = `발주서 ${po.poNo} ${po.vendorName}`;
@@ -69,6 +75,40 @@ export default function PoDetail() {
     } catch (e) {
       toast(errMsg(e), 'err');
     }
+  };
+
+  /** 발주 수정 저장 */
+  const saveLines = async () => {
+    if (!lineEdit) return;
+    const keep = lineEdit.rows.filter((r) => !r.del);
+    if (!keep.length) return toast('줄을 모두 지우려면 발주 취소를 쓰세요.', 'err');
+    for (const r of lineEdit.rows) {
+      const got = rec.get(`${po.id}#${poLineKey(r.l)}`) ?? 0;
+      if (r.del && got > 0) return toast(`${r.l.itemName} ${r.l.spec}: 입고된 줄은 지울 수 없습니다.`, 'err');
+      if (!r.del && num(r.qty) <= 0) return toast(`${r.l.itemName} ${r.l.spec}: 발주수량을 입력하세요.`, 'err');
+      if (!r.del && num(r.qty) < got) return toast(`${r.l.itemName} ${r.l.spec}: 이미 ${got.toLocaleString()} 입고되어 그보다 적게 할 수 없습니다.`, 'err');
+    }
+    const parts: string[] = [];
+    const lines: PoLine[] = keep.map((r) => {
+      const qty = num(r.qty);
+      const price = num(r.price);
+      const nm = `${r.l.itemName} ${r.l.spec}`.trim();
+      if (qty !== r.l.qty) parts.push(`${nm} 수량 ${r.l.qty.toLocaleString()}→${qty.toLocaleString()}`);
+      if (price !== (r.l.price || 0)) parts.push(`${nm} 단가 ${won(r.l.price || 0)}→${won(price)}`);
+      const remark = r.remark.trim();
+      const { remark: _old, ...rest } = r.l;
+      void _old;
+      return { ...rest, qty, price, amount: Math.round(qty * price), ...(remark ? { remark } : {}) };
+    });
+    lineEdit.rows.filter((r) => r.del).forEach((r) => parts.push(`${r.l.itemName} ${r.l.spec} 삭제`));
+    const remarkChanged = keep.some((r) => (r.remark.trim() || '') !== (r.l.remark || ''));
+    if (!parts.length && !remarkChanged) return setLineEdit(null);
+    const reAck = !!po.ackAt && parts.length > 0;
+    await update(
+      { lines, totalAmount: lines.reduce((a, l) => a + l.amount, 0), revisedAt: Date.now(), ...(reAck ? { ackAt: 0, ackBy: '' } : {}) },
+      `발주 수정: ${parts.slice(0, 6).join(', ')}${parts.length > 6 ? ` 외 ${parts.length - 6}건` : ''}${!parts.length ? '비고' : ''}`,
+    );
+    setLineEdit(null);
   };
 
   const mailText = () => {
@@ -193,9 +233,16 @@ export default function PoDetail() {
             </button>
           )}
           {isOffice && po.status !== 'cancelled' && (
+            <button className="btn-ghost" onClick={() => setLineEdit({ rows: po.lines.map((l) => ({ l, qty: commaText(String(l.qty)), price: l.price ? commaText(String(l.price)) : '', remark: l.remark ?? '', del: false })) })}>
+              발주 수정
+            </button>
+          )}
+          {isOffice && po.status !== 'cancelled' && (
             <button
               className="btn-danger"
               onClick={() => {
+                const got = po.lines.reduce((a, l) => a + (rec.get(`${po.id}#${poLineKey(l)}`) ?? 0), 0);
+                if (got > 0) return toast('입고 기록이 있는 발주서는 취소할 수 없습니다. 입고 현황에서 입고를 먼저 취소하세요.', 'err');
                 if (confirm('발주를 취소할까요? 품목은 다시 발주 대기로 돌아갑니다.')) update({ status: 'cancelled', cancelledAt: Date.now() }, '취소');
               }}
             >
@@ -204,6 +251,65 @@ export default function PoDetail() {
           )}
         </div>
       </div>
+
+      {lineEdit && (
+        <div className="no-print card mb-4 overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
+            <span className="font-semibold">발주 수정</span>
+            <span className="text-[12px] text-muted">수량은 입고된 수량보다 적게 할 수 없습니다. 지운 줄은 발주 대기로 돌아갑니다. 업체가 발주 확인을 했다면 다시 확인받습니다.</span>
+            <div className="ml-auto flex gap-2">
+              <button className="btn-ghost" onClick={() => setLineEdit(null)}>
+                닫기
+              </button>
+              <button className="btn-primary" onClick={saveLines}>
+                수정 저장
+              </button>
+            </div>
+          </div>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>품명</th>
+                <th>규격</th>
+                <th>단위</th>
+                <th className="num">입고</th>
+                <th className="num w-28">발주수량</th>
+                <th className="num w-32">단가</th>
+                <th className="num">금액</th>
+                <th>비고</th>
+                <th className="w-16 text-center">줄 삭제</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lineEdit.rows.map((r, i) => {
+                const got = rec.get(`${po.id}#${poLineKey(r.l)}`) ?? 0;
+                const set = (patch: Partial<(typeof lineEdit.rows)[number]>) => setLineEdit({ rows: lineEdit.rows.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+                return (
+                  <tr key={poLineKey(r.l)} className={r.del ? 'text-muted line-through' : ''}>
+                    <td>{r.l.itemName}</td>
+                    <td>{r.l.spec}</td>
+                    <td>{r.l.unit}</td>
+                    <td className="num">{got ? got.toLocaleString() : ''}</td>
+                    <td className="num">
+                      <input className={`input h-7 w-24 px-1.5 text-right ${num(r.qty) < got ? 'border-red-400 bg-red-50' : ''}`} disabled={r.del} value={r.qty} onChange={(e) => set({ qty: commaText(e.target.value) })} />
+                    </td>
+                    <td className="num">
+                      <input className="input h-7 w-28 px-1.5 text-right" disabled={r.del} value={r.price} onChange={(e) => set({ price: commaText(e.target.value) })} />
+                    </td>
+                    <td className="num">{won(Math.round(num(r.qty) * num(r.price)))}</td>
+                    <td>
+                      <input className="input h-7 w-full px-1.5" disabled={r.del} value={r.remark} onChange={(e) => set({ remark: e.target.value })} />
+                    </td>
+                    <td className="text-center">
+                      <input type="checkbox" checked={r.del} disabled={got > 0} title={got > 0 ? '입고된 줄은 지울 수 없습니다' : ''} onChange={(e) => set({ del: e.target.checked })} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {edit && (
         <div className="no-print card mb-4 grid gap-3 p-4 md:grid-cols-[200px_1fr_1fr_auto]">

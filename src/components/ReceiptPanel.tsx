@@ -9,7 +9,7 @@ import { commaText, errMsg, useToast } from './ui';
 import type { PurchaseOrder, Receipt } from '../types';
 
 /** 발주서 한 장의 입고 입력 + 입고 기록 */
-export default function ReceiptPanel({ po, receipts, prices = [] }: { po: PurchaseOrder; receipts: Receipt[]; prices?: PoPrice[] }) {
+export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po: PurchaseOrder; receipts: Receipt[]; prices?: PoPrice[]; billed?: Set<string> }) {
   const { profile, vendor, can, readOnly } = useAuth();
   const toast = useToast();
   const mine = receipts.filter((r) => r.poId === po.id);
@@ -149,11 +149,21 @@ export default function ReceiptPanel({ po, receipts, prices = [] }: { po: Purcha
     }
   };
 
-  const remove = async (r: Receipt) => {
-    if (!confirm(`${r.date} ${r.itemName} ${r.qty}${r.unit} 입고 기록을 지울까요?`)) return;
+  /** 업체: 자기가 등록한 입고는 현장 확인 뒤에도 취소 가능 (거래명세서로 제출한 것은 불가) */
+  const canCancel = (r: Receipt) =>
+    !readOnly && (isVendor ? r.enteredBy === vendor?.id && !billed?.has(r.id) : !r.confirmed || can('admin', 'material'));
+  const remove = async (list: Receipt[]) => {
+    if (!list.length) return;
+    const confirmedN = list.filter((r) => r.confirmed).length;
+    const msg =
+      list.length === 1
+        ? `${list[0].date} ${list[0].itemName} ${list[0].qty}${list[0].unit} 입고를 취소할까요?`
+        : `이 발주서의 입고 기록 ${list.length}건을 모두 취소할까요?`;
+    if (!confirm(msg + (confirmedN ? `\n(현장 확인된 입고 ${confirmedN}건 포함)` : ''))) return;
     try {
-      await commitBatch([{ type: 'delete', col: C.receipts, id: r.id }]);
-      toast('지웠습니다.');
+      await commitBatch(list.map((r) => ({ type: 'delete' as const, col: C.receipts, id: r.id })));
+      await audit('입고 취소', po.poNo, { lines: list.length, by: who });
+      toast(`입고 ${list.length}건을 취소했습니다.`);
     } catch (e) {
       toast(errMsg(e), 'err');
     }
@@ -301,10 +311,15 @@ export default function ReceiptPanel({ po, receipts, prices = [] }: { po: Purcha
         </tbody>
       </table>
 
-      <div className="flex items-center justify-between border-t border-line px-4 py-2">
+      <div className="flex items-center gap-2 border-t border-line px-4 py-2">
         <span className="font-semibold">입고 기록 {mine.length}건</span>
+        {mine.filter(canCancel).length > 1 && (
+          <button className="btn-ghost ml-auto h-7 text-[12px] text-red-600" onClick={() => remove(mine.filter(canCancel))}>
+            입고 전체 취소 ({mine.filter(canCancel).length}건)
+          </button>
+        )}
         {canConfirm && mine.some((r) => !r.confirmed) && (
-          <button className="btn-dark h-7 text-[12px]" onClick={confirmAll}>
+          <button className="btn-dark ml-auto h-7 text-[12px]" onClick={confirmAll}>
             미확인 입고 모두 확인
           </button>
         )}
@@ -339,11 +354,13 @@ export default function ReceiptPanel({ po, receipts, prices = [] }: { po: Purcha
                 </td>
                 <td>{r.confirmed ? <span className="chip bg-emerald-50 text-emerald-700">확인 {r.confirmedByName}</span> : <span className="chip bg-line text-muted">미확인</span>}</td>
                 <td className="text-right">
-                  {!readOnly && ((!r.confirmed && (!isVendor || r.enteredBy === vendor?.id)) || can('admin')) && (
-                    <button className="text-[12px] text-muted hover:text-red-600" onClick={() => remove(r)}>
-                      지우기
+                  {canCancel(r) ? (
+                    <button className="text-[12px] text-muted hover:text-red-600" onClick={() => remove([r])}>
+                      입고 취소
                     </button>
-                  )}
+                  ) : isVendor && billed?.has(r.id) ? (
+                    <span className="text-[11px] text-muted" title="거래명세서로 제출한 입고는 취소할 수 없습니다">명세서 제출됨</span>
+                  ) : null}
                 </td>
               </tr>
             ))}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { where } from 'firebase/firestore';
 import { useAuth } from '../../auth/AuthContext';
 import { commitBatch, useCollection } from '../../lib/db';
 import { C } from '../../lib/firebase';
@@ -8,7 +9,7 @@ import ReceiptPanel from '../../components/ReceiptPanel';
 import VendorStatement from './VendorStatement';
 import { Empty, errMsg, RateBar, useToast } from '../../components/ui';
 import { MIN_ROWS, PoSheet, signBoxes } from '../po/PoDetail';
-import type { Site } from '../../types';
+import type { Invoice, Site } from '../../types';
 
 /** 업체 전용 화면: 자기 업체 발주서 확인 · 입고 등록 */
 export default function VendorPortal() {
@@ -36,6 +37,22 @@ export default function VendorPortal() {
       toast(errMsg(e), 'err');
     }
   };
+  const unack = async (id: string) => {
+    if (!confirm('발주 확인을 취소할까요?')) return;
+    try {
+      await commitBatch([{ type: 'set', col: C.purchaseOrders, id, data: { ackAt: 0, ackBy: '' } }]);
+      toast('발주 확인을 취소했습니다.');
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    }
+  };
+  // 이미 거래명세서로 제출한 입고 기록 (입고 취소 불가)
+  const invoices = useCollection<Invoice>(C.invoices, vendor ? [where('vendorId', '==', vendor.vendorId)] : [], vendor?.vendorId ?? '', !!vendor);
+  const billed = useMemo(() => {
+    const s = new Set<string>();
+    invoices.data.forEach((inv) => inv.lines.forEach((l) => l.receiptIds?.forEach((x) => s.add(x))));
+    return s;
+  }, [invoices.data]);
 
   return (
     <div className="min-h-full bg-canvas">
@@ -102,11 +119,19 @@ export default function VendorPortal() {
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {p.ackAt ? (
-                          <span className="chip bg-emerald-50 text-emerald-700">확인 {new Date(p.ackAt).toLocaleDateString('ko-KR')}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="chip bg-emerald-50 text-emerald-700">확인 {new Date(p.ackAt).toLocaleDateString('ko-KR')}</span>
+                            <button className="text-[11.5px] text-muted hover:text-red-600" onClick={() => unack(p.id)}>
+                              확인 취소
+                            </button>
+                          </div>
                         ) : (
-                          <button className="btn-primary h-7 text-[12px]" onClick={() => ack(p.id)}>
-                            발주 확인
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button className="btn-primary h-7 text-[12px]" onClick={() => ack(p.id)}>
+                              발주 확인
+                            </button>
+                            {p.revisedAt ? <span className="chip bg-amber-soft text-amber-800">발주 변경됨 · 다시 확인</span> : null}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -141,7 +166,7 @@ export default function VendorPortal() {
             </div>
             {view === 'receipt' ? (
               <div className="card overflow-hidden">
-                <ReceiptPanel po={cur} receipts={receipts.data} prices={pos.prices} />
+                <ReceiptPanel po={cur} receipts={receipts.data} prices={pos.prices} billed={billed} />
               </div>
             ) : (
               <PoSheet po={cur} site={sites.data.find((s) => s.id === cur.siteId)} boxes={signBoxes(cur)} internal={false} showPrice pad={Math.max(0, MIN_ROWS - cur.lines.length)} />
