@@ -21,6 +21,7 @@ export interface ErpUser {
   siteIds: string[];
   active: boolean;
   position?: string; // 직급
+  signImage?: string; // 결재 싸인 (PNG data URL, 바탕 투명)
 }
 
 export interface Site {

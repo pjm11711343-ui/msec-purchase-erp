@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { createAccount } from '../../lib/accounts';
-import { orderBy } from 'firebase/firestore';
+import { deleteField, orderBy } from 'firebase/firestore';
 import { audit, commitBatch, useCollection } from '../../lib/db';
+import { prepareSign } from '../../lib/sign';
 import { auth, C, idToEmail, ID_LOGIN_DOMAIN } from '../../lib/firebase';
 import { useSites } from '../../lib/hooks';
 import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
@@ -18,9 +19,10 @@ interface Form {
   role: Role;
   siteIds: string[];
   active: boolean;
+  sign: string; // 싸인 이미지 ('' = 없음)
 }
 
-const EMPTY: Form = { id: null, name: '', position: '', loginType: 'id', login: '', password: '', role: 'siteStaff', siteIds: [], active: true };
+const EMPTY: Form = { id: null, name: '', position: '', loginType: 'id', login: '', password: '', role: 'siteStaff', siteIds: [], active: true, sign: '' };
 
 export default function Users() {
   const users = useCollection<ErpUser>(C.users, [orderBy('name')]);
@@ -55,6 +57,7 @@ export default function Users() {
         role: form.role,
         siteIds: needsSites(form.role) ? form.siteIds : [],
         active: form.active,
+        ...(form.sign ? { signImage: form.sign } : form.id ? { signImage: deleteField() as unknown as string } : {}),
         ...(form.id ? {} : { email, loginId, createdAt: Date.now() }),
       };
       await commitBatch([{ type: 'set', col: C.users, id: uid, data }]);
@@ -106,6 +109,7 @@ export default function Users() {
                 <th>로그인</th>
                 <th>역할</th>
                 <th>담당 현장</th>
+                <th>싸인</th>
                 <th>상태</th>
                 <th></th>
               </tr>
@@ -120,6 +124,7 @@ export default function Users() {
                     <span className="chip bg-navy-950/5 text-navy-900">{ROLE_LABEL[u.role]}</span>
                   </td>
                   <td className="text-[12px]">{needsSites(u.role) ? (u.siteIds ?? []).map(siteName).join(', ') || <span className="text-amber-700">지정 필요</span> : '전체'}</td>
+                  <td>{u.signImage ? <img src={u.signImage} alt={`${u.name} 싸인`} className="h-7 max-w-[90px] object-contain" /> : <span className="text-[11px] text-muted">없음</span>}</td>
                   <td>{u.active ? '사용' : '중지'}</td>
                   <td className="whitespace-nowrap text-right">
                     <button className="btn-ghost h-7 text-[12px]" onClick={() => reset(u)}>
@@ -138,6 +143,7 @@ export default function Users() {
                           role: u.role,
                           siteIds: u.siteIds ?? [],
                           active: u.active,
+                          sign: u.signImage ?? '',
                         })
                       }
                     >
@@ -211,6 +217,39 @@ export default function Users() {
                 </select>
               </Field>
             )}
+            <div className="col-span-2">
+              <Field label="결재 싸인" hint="흰 종이에 쓴 싸인을 찍은 사진·스캔(JPG·PNG). 바탕은 자동으로 지우고 싸인 부분만 잘라 저장합니다. 결재 승인하면 청구서·발주서 결재란에 들어갑니다.">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex h-16 w-44 items-center justify-center rounded-md border border-dashed border-line bg-[repeating-conic-gradient(#f3f4f6_0%_25%,#fff_0%_50%)] bg-[length:12px_12px]">
+                    {form.sign ? <img src={form.sign} alt="싸인 미리보기" className="max-h-14 max-w-40 object-contain" /> : <span className="text-[12px] text-muted">싸인 없음</span>}
+                  </div>
+                  <label className="btn-ghost h-8 cursor-pointer text-[12px]">
+                    {form.sign ? '다른 이미지로 바꾸기' : '싸인 이미지 첨부'}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!f) return;
+                        try {
+                          const sign = await prepareSign(f);
+                          setForm((x) => x && { ...x, sign });
+                        } catch (err) {
+                          toast(errMsg(err), 'err');
+                        }
+                      }}
+                    />
+                  </label>
+                  {form.sign && (
+                    <button className="text-[12px] text-muted hover:text-red-600" onClick={() => setForm({ ...form, sign: '' })}>
+                      싸인 지우기
+                    </button>
+                  )}
+                </div>
+              </Field>
+            </div>
             {needsSites(form.role) && (
               <div className="col-span-2">
                 <Field label={`담당 현장 (${form.siteIds.length}곳)`}>

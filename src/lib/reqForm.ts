@@ -34,7 +34,7 @@ const md = (t?: number) => {
 };
 
 /** 양식 워크북에 청구서 내용을 채운다 (워크북을 그대로 고쳐 쓴다) */
-export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSummary, logo?: ArrayBuffer): { truncated: number } {
+export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSummary, logo?: ArrayBuffer, signs?: Map<string, string>): { truncated: number } {
   const ws = wb.getWorksheet('청구서') ?? wb.worksheets[0];
   if (logo) {
     // 회사 로고 (양식 왼쪽 위)
@@ -115,7 +115,26 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     const col = SIGN_COL.find((x) => x.test.test(s.label))?.col;
     if (!col || !s.userName || s.result === 'skipped') continue;
     const state = s.result === 'approved' ? `${md(s.at)} 승인` : s.result === 'rejected' ? '반려' : '';
-    if (col === 'M' || col === 'O') set(`${col}31`, state ? `${s.userName}\n${state}` : s.userName);
+    // 승인했고 싸인 이미지가 있으면 이름 대신 싸인
+    const sign = s.result === 'approved' && s.userId ? signs?.get(s.userId) : undefined;
+    const site = col === 'M' || col === 'O';
+    if (sign) {
+      const img = wb.addImage({ base64: sign, extension: 'png' });
+      const c0 = col.charCodeAt(0) - 65; // A=0
+      ws.addImage(img, { tl: { col: c0 + 0.1, row: 29.1 }, ext: site ? { width: 70, height: 26 } : { width: col === 'T' ? 50 : 58, height: 24 }, editAs: 'oneCell' });
+      if (site) {
+        set(`${col}31`, state);
+        ws.getCell(`${col}31`).alignment = { horizontal: 'center', vertical: 'bottom', wrapText: true };
+        ws.getCell(`${col}31`).font = { name: '맑은 고딕', size: 7, color: { argb: 'FF000000' } };
+      } else {
+        set(`${col}31`, null);
+        set(`${col}32`, state || null);
+        ws.getCell(`${col}32`).font = { name: '맑은 고딕', size: 7, color: { argb: 'FF000000' } };
+        ws.getCell(`${col}32`).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+      }
+      continue;
+    }
+    if (site) set(`${col}31`, state ? `${s.userName}\n${state}` : s.userName);
     else {
       set(`${col}31`, s.userName);
       set(`${col}32`, state || null);

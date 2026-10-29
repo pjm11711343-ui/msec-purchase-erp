@@ -17,6 +17,7 @@ import PickInput from '../../components/PickInput';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { reqSummary, type ReqSummary } from '../../lib/reqSummary';
+import { signMap } from '../../lib/sign';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
 const TEMPLATES: Record<Requisition['approvalType'], string[]> = {
@@ -43,6 +44,7 @@ export default function ReqEdit() {
   const reqs = useRequisitions();
   const lines = useApprovalLines();
   const users = useUsers();
+  const signs = useMemo(() => signMap(users.data), [users.data]);
   const prices = usePrices();
   const pos = usePurchaseOrders();
   const ordered = useMemo(() => orderedKeys(pos.data), [pos.data]);
@@ -432,7 +434,7 @@ export default function ReqEdit() {
       const sumX = reqSummary(req, cats.data, reqs.data, pos.data);
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(tpl);
-      const { truncated } = fillReqForm(wb, req, sumX, logo);
+      const { truncated } = fillReqForm(wb, req, sumX, logo, signs.byId);
       const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -894,7 +896,11 @@ export default function ReqEdit() {
                               <span className="text-muted">/</span>
                             ) : (
                               <>
-                                <span className="font-medium">{s.userName}</span>
+                                {s.result === 'approved' && s.userId && signs.byId.get(s.userId) ? (
+                                  <img src={signs.byId.get(s.userId)} alt={`${s.userName} 싸인`} title={s.userName} className="h-8 max-w-[70px] object-contain" />
+                                ) : (
+                                  <span className="font-medium">{s.userName}</span>
+                                )}
                                 {s.result === 'approved' && <span className="text-[10.5px] text-emerald-700">승인 {s.at ? new Date(s.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : ''}</span>}
                                 {s.result === 'rejected' && <span className="text-[10.5px] text-red-600">반려</span>}
                               </>

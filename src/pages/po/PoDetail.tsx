@@ -10,7 +10,8 @@ import { preOrderState, usePurchaseOrders } from '../../lib/pos';
 import { poLineKey, receivedMap, useReceipts } from '../../lib/receipts';
 import { num } from '../../lib/normalize';
 import { usePoPrices } from '../../lib/poPrices';
-import { useRequisitions } from '../../lib/reqs';
+import { useRequisitions, useUsers } from '../../lib/reqs';
+import { signMap } from '../../lib/sign';
 import { commaText, errMsg, useToast } from '../../components/ui';
 import { PoChip, PreChip } from './PoList';
 import type { PoLine, PurchaseOrder, Site } from '../../types';
@@ -22,19 +23,12 @@ function spaced(s: string) {
 }
 
 /** 결재선(2단계/6칸)을 발주서 결재란 위치에 맞춘다 */
-export function signBoxes(po: PurchaseOrder) {
+export function signBoxes(po: PurchaseOrder, signOf?: (re: RegExp) => string | undefined) {
   const find = (re: RegExp) => po.signNames.find((s) => re.test(s.label.replace(/\s/g, '')))?.name;
+  const box = (label: string, re: RegExp) => ({ label, name: find(re), sign: signOf?.(re) });
   return {
-    site: [
-      { label: '담  당', name: find(/^현장담당/) },
-      { label: '소  장', name: find(/소장/) },
-    ],
-    hq: [
-      { label: '담  당', name: find(/^본사담당|^자재부/) },
-      { label: '팀  장', name: find(/팀장/) },
-      { label: '임  원', name: find(/임원/) },
-      { label: '대  표', name: find(/대표/) },
-    ],
+    site: [box('담  당', /^현장담당/), box('소  장', /소장/)],
+    hq: [box('담  당', /^본사담당|^자재부/), box('팀  장', /팀장/), box('임  원', /임원/), box('대  표', /대표/)],
   };
 }
 
@@ -46,6 +40,14 @@ export default function PoDetail() {
   const pos = usePurchaseOrders();
   const reqs = useRequisitions();
   const prices = usePoPrices();
+  const users = useUsers();
+  const signs = signMap(users.data);
+  /** 결재란 싸인: 연결된 청구서에서 그 칸 결재자가 승인했으면 싸인 이미지 */
+  const signOf = (re: RegExp) => {
+    const r = reqs.data.find((x) => po?.reqIds.includes(x.id));
+    const st = r?.steps.find((s) => re.test(s.label.replace(/\s/g, '')));
+    return st?.result === 'approved' && st.userId ? signs.byId.get(st.userId) : undefined;
+  };
   const sites = useSites();
   const toast = useToast();
   const po = pos.data.find((p) => p.id === id);
@@ -142,7 +144,7 @@ export default function PoDetail() {
   };
 
   const exportExcel = () => {
-    const b = signBoxes(po);
+    const b = signBoxes(po, signOf);
     const aoa: (string | number | null)[][] = [
       [`${po.siteName} 현장\n발   주   서`, null, null, null, '결\n재', '담  당', '팀  장'],
       [null, null, null, null, null, b.hq[0].name ?? '', b.hq[1].name ?? ''],
@@ -173,7 +175,7 @@ export default function PoDetail() {
     XLSX.writeFile(wb, `발주서_${po.siteName}_${po.vendorName}_${po.poNo}.xlsx`);
   };
 
-  const b = signBoxes(po);
+  const b = signBoxes(po, signOf);
   const pad = Math.max(0, MIN_ROWS - po.lines.length);
 
   return (
@@ -425,7 +427,7 @@ export function PoSheet({
           <tr>
             {(internal ? [...boxes.site, ...boxes.hq] : boxes.hq.slice(0, 2)).map((s, i) => (
               <td key={i} className={`${cell} h-12 text-center text-[11px]`}>
-                {s.name ?? ''}
+                {s.sign ? <img src={s.sign} alt={`${s.name ?? ''} 싸인`} title={s.name} className="mx-auto h-9 max-w-[52px] object-contain" /> : (s.name ?? '')}
               </td>
             ))}
           </tr>
