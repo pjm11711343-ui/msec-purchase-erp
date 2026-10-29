@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
 import { C } from '../../lib/firebase';
-import { useLedger, useSiteCategories, useSites, useVendors } from '../../lib/hooks';
-import { fillReqForm, type ReqFormCat } from '../../lib/reqForm';
+import { useSiteCategories, useSites, useVendors } from '../../lib/hooks';
+import { fillReqForm } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
@@ -16,6 +16,7 @@ import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList
 import PickInput from '../../components/PickInput';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
 import { normItem, normSpec } from '../../lib/itemNorm';
+import { reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
 const TEMPLATES: Record<Requisition['approvalType'], string[]> = {
@@ -39,7 +40,6 @@ export default function ReqEdit() {
   const sites = useSites();
   const vendors = useVendors();
   const cats = useSiteCategories();
-  const ledger = useLedger();
   const reqs = useRequisitions();
   const lines = useApprovalLines();
   const users = useUsers();
@@ -219,6 +219,7 @@ export default function ReqEdit() {
     !!l.itemName.trim() && (!itemSet.has(normItem(l.itemName)) || (!!l.spec.trim() && !specOk(l.itemName, l.spec)));
 
   const total = d.lines.reduce((a, l) => a + lineAmount(l), 0);
+  const summary = reqSummary(d, cats.data, reqs.data, pos.data);
   /** 이 청구서에서 이미 발주된 발주서 (결재 중이면 선발주) */
   const preOrdered = d.id ? d.lines.map((l) => ordered.get(`${d.id}|${l.key}`)).filter((p): p is NonNullable<typeof p> => !!p) : [];
 
@@ -385,19 +386,10 @@ export default function ReqEdit() {
         fetch('/templates/logo.png').then((r) => r.arrayBuffer()),
       ]);
       const req = { ...(build({}) as Requisition), id: d.id ?? '' };
-      // 분류 요약: 이 청구서 금액이 큰 분류 4개
-      const byCat = new Map<string, number>();
-      req.lines.forEach((l) => l.siteCategoryId && byCat.set(l.siteCategoryId, (byCat.get(l.siteCategoryId) ?? 0) + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty })));
-      const list: ReqFormCat[] = [...byCat]
-        .sort((a, b) => b[1] - a[1])
-        .map(([cid, current]) => {
-          const c = cats.data.find((x) => x.id === cid);
-          const used = ledger.data.filter((e) => e.siteCategoryId === cid).reduce((a, e) => a + e.amount, 0);
-          return { name: c?.name ?? '', contract: c?.contractAmount ?? 0, change: c?.changeAmount ?? 0, exec: c?.execAmount ?? 0, prior: (c?.migratedInput ?? 0) + used, current };
-        });
+      const sumX = reqSummary(req, cats.data, reqs.data, pos.data);
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(tpl);
-      const { truncated } = fillReqForm(wb, req, list, logo);
+      const { truncated } = fillReqForm(wb, req, sumX, logo);
       const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -861,6 +853,8 @@ export default function ReqEdit() {
         )}
       </div>
 
+      {d.siteId && <SummaryPanel sum={summary} />}
+
       {d.history.length > 0 && (
         <div className="card mt-4 px-4 py-3">
           <div className="mb-1 font-semibold">진행 기록</div>
@@ -1010,3 +1004,122 @@ export default function ReqEdit() {
   );
 }
 
+
+/** 하단 요약: 자재분류별 계약·변경(예상)·실행·기반입·금회청구 + 업체별 금회청구 */
+function SummaryPanel({ sum }: { sum: ReqSummary }) {
+  const [onlyCur, setOnlyCur] = useState(false);
+  const vs = sum.vendors.map((v) => v.name);
+  const rows = onlyCur ? sum.rows.filter((r) => r.current) : sum.rows;
+  const f = (v: number) => (v ? won(v) : '');
+  const remain = (r: { exec: number; change: number; prior: number; current: number }) => (r.exec ? r.exec - r.prior - r.current : 0);
+  return (
+    <div className="card mt-4 overflow-hidden">
+      <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5">
+        <span className="font-semibold text-navy-950">자재분류 · 금회청구 업체별 금액</span>
+        <span className="text-[12px] text-muted">기반입금액 = 이 청구서보다 먼저 올린 이 현장 청구서의 발주 금액 (발주된 줄은 발주서 금액)</span>
+        <label className="ml-auto flex items-center gap-1 text-[12px]">
+          <input type="checkbox" checked={onlyCur} onChange={(e) => setOnlyCur(e.target.checked)} /> 이번 청구 분류만
+        </label>
+      </div>
+      {!rows.length ? (
+        <Empty>현장 투입집계 분류가 없습니다. 기준정보 › 분류에서 현장 분류를 등록하세요.</Empty>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="tbl text-[12px]">
+            <thead>
+              <tr>
+                <th rowSpan={2}>자재분류</th>
+                <th rowSpan={2} className="num">계약내역</th>
+                <th rowSpan={2} className="num">변경내역(예상)</th>
+                <th rowSpan={2} className="num">실행금액</th>
+                <th rowSpan={2} className="num">기반입금액</th>
+                <th rowSpan={2} className="num bg-amber-soft">금회청구</th>
+                {vs.length > 0 && (
+                  <th colSpan={vs.length} className="text-center">
+                    금회청구 업체별 금액
+                  </th>
+                )}
+                <th rowSpan={2} className="num" title="실행금액 − 기반입금액 − 금회청구">
+                  실행 잔액
+                </th>
+              </tr>
+              <tr>
+                {vs.map((v) => (
+                  <th key={v} className={`num whitespace-nowrap ${v === '거래선 미지정' ? 'text-amber-700' : ''}`}>
+                    {v}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const rm = remain(r);
+                return (
+                  <tr key={r.id} className={r.current ? 'bg-amber-soft/40 font-medium' : 'text-muted'}>
+                    <td className="whitespace-nowrap">{r.name}</td>
+                    <td className="num">{f(r.contract)}</td>
+                    <td className="num">{f(r.change)}</td>
+                    <td className="num">{f(r.exec)}</td>
+                    <td className="num">{f(r.prior)}</td>
+                    <td className="num font-semibold text-ink">{f(r.current)}</td>
+                    {vs.map((v) => (
+                      <td key={v} className="num">
+                        {f(r.byVendor[v] ?? 0)}
+                      </td>
+                    ))}
+                    <td className={`num ${rm < 0 ? 'font-semibold text-red-600' : ''}`}>{r.exec ? won(rm) : ''}</td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-[#f7f8fb] font-semibold">
+                <td>합 계</td>
+                <td className="num">{won(sum.total.contract)}</td>
+                <td className="num">{won(sum.total.change)}</td>
+                <td className="num">{won(sum.total.exec)}</td>
+                <td className="num">{won(sum.total.prior)}</td>
+                <td className="num">{won(sum.total.current)}</td>
+                {vs.map((v) => (
+                  <td key={v} className="num">
+                    {won(sum.total.byVendor[v] ?? 0)}
+                  </td>
+                ))}
+                <td className={`num ${remain(sum.total) < 0 ? 'text-red-600' : ''}`}>{sum.total.exec ? won(remain(sum.total)) : ''}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {sum.vendors.length > 0 && (
+        <div className="border-t border-line px-4 py-3">
+          <div className="mb-1 font-semibold">금회청구 업체별 합계</div>
+          <table className="tbl w-auto min-w-[420px] text-[12px]">
+            <thead>
+              <tr>
+                <th>업체</th>
+                <th className="num">줄 수</th>
+                <th className="num">금회청구 금액</th>
+                <th className="num">비율</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sum.vendors.map((v) => (
+                <tr key={v.name}>
+                  <td className={v.name === '거래선 미지정' ? 'text-amber-700' : ''}>{v.name}</td>
+                  <td className="num">{v.lines}</td>
+                  <td className="num font-semibold">{won(v.amount)}</td>
+                  <td className="num text-muted">{sum.total.current ? `${((v.amount / sum.total.current) * 100).toFixed(1)}%` : ''}</td>
+                </tr>
+              ))}
+              <tr className="bg-[#f7f8fb] font-semibold">
+                <td>합 계</td>
+                <td className="num">{sum.vendors.reduce((a, v) => a + v.lines, 0)}</td>
+                <td className="num">{won(sum.total.current)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
