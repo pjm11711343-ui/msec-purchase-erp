@@ -1,4 +1,5 @@
 // 구매청구서 엑셀 읽기(업로드) / 쓰기(다운로드) — 기존 청구서 시트 열 배치를 그대로 따른다
+//   7행 = 사용 위치·공정 제목 줄(품목 아님), 품목은 8행부터
 //   B 품명 · C 규격 · D 단위 · E 계약수량 · F 계약단가 · G 실행량 · H 기반입 · I 금회청구 · J 본/비고
 //   K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고
 import * as XLSX from 'xlsx';
@@ -31,12 +32,24 @@ export function parseReqSheet(wb: XLSX.WorkBook): ParsedReqSheet {
   const docDate = toDateStr(d);
   let purpose = '';
   const lines: Omit<ReqLine, 'key'>[] = [];
+  let inSummary = false; // 아래쪽 분류 요약표(품 명 | 계 약 내 역 …) ~ "위와 같이 구매 의뢰" 사이
   rows.forEach((r, idx) => {
     if (idx < 6) return;
+    const bk = nameKey(s(r, 1));
+    if (bk.startsWith('품명') && nameKey(s(r, 2)).startsWith('계약내역')) {
+      inSummary = true;
+      return;
+    }
+    if (inSummary) {
+      if (bk.startsWith('위와같이')) inSummary = false;
+      return;
+    }
     const t = s(r, 19);
     if (t.startsWith('사용 목적') || t.startsWith('사용목적')) {
       purpose = s(rows[idx + 1] ?? [], 19) || purpose;
     }
+    // 7행(첫 줄)은 품목이 아니라 사용 위치·공정 제목 줄 (예: "지하주차장 위생배관 부속 / 1~9동 / 부족분") → 무시
+    if (idx === 6) return;
     const item = s(r, 1);
     if (!item) return;
     const k = nameKey(item);

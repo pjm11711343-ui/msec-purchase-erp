@@ -1,7 +1,7 @@
 // 구매청구서 엑셀: 회사 기존 '청구서' 양식(public/templates/req-form.xlsx)에 값을 채워 내려받기
 // 양식 배치 (기존 청구서 엑셀과 동일)
 //   U2 현장명 · B4 "현장명 : ○○ 현장" · O4 결의 날짜 · S4 결의번호
-//   품목: 7~20행(1쪽 14줄) → 35~188행(이어지는 쪽)
+//   7행: 사용 위치·공정 제목 줄 · 품목: 8~20행(1쪽 13줄) → 35~188행(이어지는 쪽)
 //     B 품명 · C 규격 · D 단위 · E 계약수량 · F 계약단가 · G 실행량 · H 기반입 · I 금회청구 · J 본/비고
 //     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 '사용 목적', T8 사용 목적 내용)
 //   분류 요약: 22·24·26·28행 B 분류 · C 계약 · D 변경(예상) · G 실행 · H 기반입금액 · I 금회청구
@@ -13,7 +13,8 @@ import type { Requisition } from '../types';
 import { bonNote } from './pipe';
 import { NO_VENDOR, type ReqSummary, type SumRow } from './reqSummary';
 
-export const ITEM_ROWS = [...Array.from({ length: 14 }, (_, i) => 7 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
+// 7행은 사용 위치·공정 제목 줄 → 품목은 8~20행(1쪽 13줄), 이어서 35~188행
+export const ITEM_ROWS = [...Array.from({ length: 13 }, (_, i) => 8 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
 
 
 const SIGN_COL: { test: RegExp; col: string }[] = [
@@ -55,7 +56,9 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const lines = req.lines.filter((l) => l.itemName);
   // 양식의 금액 칸은 수식용 회색 글씨, 첫 줄 품명은 굵은 글씨라 일반 글씨로 맞춘다
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
-  ws.getCell('B7').font = { ...(ws.getCell('B8').font ?? {}) };
+  // 7행 제목 줄: 이 청구서 줄들의 사용 위치·공정
+  const locs = [...new Set(lines.map((l) => (l.location ?? '').trim()).filter(Boolean))];
+  set('B7', locs.length ? (locs.length > 3 ? `${locs.slice(0, 3).join(' · ')} 외` : locs.join(' · ')) : null);
   lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
     const r = ITEM_ROWS[i];
     set(`B${r}`, l.itemName);
@@ -147,7 +150,7 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   set('I32', { formula: 'SUM(P6:Q188)', result: total } as ExcelJS.CellFormulaValue);
 
   // 인쇄 범위: 쓴 줄까지만 (빈 쪽이 인쇄되지 않게)
-  const extra = Math.max(0, lines.length - 14);
+  const extra = Math.max(0, lines.length - 13);
   const last = extra ? 34 + extra : 32;
   ws.pageSetup.printArea = `A1:X${last}`;
   wb.calcProperties = { ...(wb.calcProperties ?? {}), fullCalcOnLoad: true };

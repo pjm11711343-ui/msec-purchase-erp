@@ -509,7 +509,7 @@ export default function ReqEdit() {
       a.download = `구매청구서_${req.siteName}_${req.docNo || req.requestDate}.xlsx`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      if (truncated) toast(`양식은 168줄까지라 ${truncated}줄은 빠졌습니다.`, 'err');
+      if (truncated) toast(`양식은 167줄까지라 ${truncated}줄은 빠졌습니다.`, 'err');
     } catch (e) {
       toast(errMsg(e), 'err');
     } finally {
