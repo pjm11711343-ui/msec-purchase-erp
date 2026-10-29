@@ -1008,7 +1008,6 @@ export default function ReqEdit() {
 /** 하단 요약: 자재분류별 계약·변경(예상)·실행·기반입·금회청구 + 업체별 금회청구 */
 function SummaryPanel({ sum }: { sum: ReqSummary }) {
   const [onlyCur, setOnlyCur] = useState(false);
-  const vs = sum.vendors.map((v) => v.name);
   const rows = onlyCur ? sum.rows.filter((r) => r.current) : sum.rows;
   const f = (v: number) => (v ? won(v) : '');
   const remain = (r: { exec: number; change: number; prior: number; current: number }) => (r.exec ? r.exec - r.prior - r.current : 0);
@@ -1028,27 +1027,15 @@ function SummaryPanel({ sum }: { sum: ReqSummary }) {
           <table className="tbl text-[12px]">
             <thead>
               <tr>
-                <th rowSpan={2}>자재분류</th>
-                <th rowSpan={2} className="num">계약내역</th>
-                <th rowSpan={2} className="num">변경내역(예상)</th>
-                <th rowSpan={2} className="num">실행금액</th>
-                <th rowSpan={2} className="num">기반입금액</th>
-                <th rowSpan={2} className="num bg-amber-soft">금회청구</th>
-                {vs.length > 0 && (
-                  <th colSpan={vs.length} className="text-center">
-                    금회청구 업체별 금액
-                  </th>
-                )}
-                <th rowSpan={2} className="num" title="실행금액 − 기반입금액 − 금회청구">
+                <th>자재분류</th>
+                <th className="num">계약내역</th>
+                <th className="num">변경내역(예상)</th>
+                <th className="num">실행금액</th>
+                <th className="num">기반입금액</th>
+                <th className="min-w-[260px] bg-amber-soft text-center">금회청구</th>
+                <th className="num" title="실행금액 − 기반입금액 − 금회청구">
                   실행 잔액
                 </th>
-              </tr>
-              <tr>
-                {vs.map((v) => (
-                  <th key={v} className={`num whitespace-nowrap ${v === '거래선 미지정' ? 'text-amber-700' : ''}`}>
-                    {v}
-                  </th>
-                ))}
               </tr>
             </thead>
             <tbody>
@@ -1061,12 +1048,9 @@ function SummaryPanel({ sum }: { sum: ReqSummary }) {
                     <td className="num">{f(r.change)}</td>
                     <td className="num">{f(r.exec)}</td>
                     <td className="num">{f(r.prior)}</td>
-                    <td className="num font-semibold text-ink">{f(r.current)}</td>
-                    {vs.map((v) => (
-                      <td key={v} className="num">
-                        {f(r.byVendor[v] ?? 0)}
-                      </td>
-                    ))}
+                    <td className="p-0">
+                      <VendorCells byVendor={r.byVendor} />
+                    </td>
                     <td className={`num ${rm < 0 ? 'font-semibold text-red-600' : ''}`}>{r.exec ? won(rm) : ''}</td>
                   </tr>
                 );
@@ -1078,11 +1062,6 @@ function SummaryPanel({ sum }: { sum: ReqSummary }) {
                 <td className="num">{won(sum.total.exec)}</td>
                 <td className="num">{won(sum.total.prior)}</td>
                 <td className="num">{won(sum.total.current)}</td>
-                {vs.map((v) => (
-                  <td key={v} className="num">
-                    {won(sum.total.byVendor[v] ?? 0)}
-                  </td>
-                ))}
                 <td className={`num ${remain(sum.total) < 0 ? 'text-red-600' : ''}`}>{sum.total.exec ? won(remain(sum.total)) : ''}</td>
               </tr>
             </tbody>
@@ -1118,6 +1097,33 @@ function SummaryPanel({ sum }: { sum: ReqSummary }) {
               </tr>
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 금회청구 칸: 업체명은 위(작게), 금액은 아래 — 종이 청구서와 같은 모양 */
+function VendorCells({ byVendor }: { byVendor: Record<string, number> }) {
+  const list = Object.entries(byVendor)
+    .filter(([, v]) => v)
+    .sort((a, b) => b[1] - a[1]);
+  if (!list.length) return null;
+  const total = list.reduce((a, [, v]) => a + v, 0);
+  return (
+    <div className="flex">
+      {list.map(([name, v]) => (
+        <div key={name} className="min-w-[86px] flex-1 border-r border-line text-center last:border-r-0">
+          <div className={`truncate border-b border-dotted border-line px-1 text-[10.5px] ${name === '거래선 미지정' ? 'text-amber-700' : 'text-muted'}`} title={name}>
+            {name}
+          </div>
+          <div className="px-1 py-0.5 text-right font-semibold text-ink">{won(v)}</div>
+        </div>
+      ))}
+      {list.length > 1 && (
+        <div className="min-w-[86px] bg-amber-soft/60 text-center">
+          <div className="border-b border-dotted border-line px-1 text-[10.5px] text-muted">계</div>
+          <div className="px-1 py-0.5 text-right font-bold text-ink">{won(total)}</div>
         </div>
       )}
     </div>

@@ -5,7 +5,7 @@
 //     B 품명 · C 규격 · D 단위 · E 계약수량 · F 계약단가 · G 실행량 · H 기반입 · I 금회청구 · J 본/비고
 //     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 '사용 목적', T8 사용 목적 내용)
 //   분류 요약: 22·24·26·28행 B 분류 · C 계약 · D 변경(예상) · G 실행 · H 기반입금액 · I 금회청구
-//     21행 N·P·R·T = 금회청구 업체 (업체별 금액은 같은 행)  ※ 4칸이 넘으면 '외' 로 묶고 전체는 '투입집계' 시트
+//     금회청구 칸(I~M): 업체명은 위 작은 줄, 금액은 아래 줄 (22·24·26행 3곳, 28행 2곳). 전체는 '투입집계' 시트
 //   결재란: 29행 머리글, 31~32행 이름·승인일 (현장 M 담당 · O 소장 / 본사 T 담당 · U 팀장 · V 임원 · W 대표)
 //   B32 날짜, I32 합계
 import type ExcelJS from 'exceljs';
@@ -78,34 +78,9 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const curRows = sum.rows.filter((r) => r.current).sort((a, b) => b.current - a.current);
   const slots: (Pick<SumRow, 'name' | 'contract' | 'change' | 'exec' | 'prior' | 'current' | 'byVendor'> | undefined)[] =
     curRows.length <= 4 ? curRows : [...curRows.slice(0, 3), merge(curRows.slice(3), `외 ${curRows.length - 3}개 분류`)];
-  // 업체 4칸: 금액 큰 순, 넘치면 4번째 칸 '외 N개 업체'
-  const vs = sum.vendors.map((v) => v.name);
-  const vCols = vs.length <= 4 ? vs.map((v) => [v]) : [...vs.slice(0, 3).map((v) => [v]), vs.slice(3)];
-  const V_COL = ['N', 'P', 'R', 'T'];
-  const vHead = (g: string[]) => (g.length === 1 ? g[0] : `외 ${g.length}개 업체`);
-  const black = { name: '맑은 고딕', size: 9, color: { argb: 'FF000000' } };
-  V_COL.forEach((c, i) => {
-    set(`${c}21`, vCols[i] ? vHead(vCols[i]) : null);
-    ws.getCell(`${c}21`).font = { ...black, bold: true };
-    ws.getCell(`${c}21`).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  });
-  // 칸 모양 정리: 금회청구(I~M)는 한 칸으로, 4번째 칸(28행)은 결재란 위 한 줄
-  const tryUnmerge = (ref: string) => {
-    try {
-      ws.unMergeCells(ref);
-    } catch {
-      /* 이미 풀림 */
-    }
-  };
-  const thin = { style: 'thin' as const };
-  const box = { top: thin, left: thin, bottom: thin, right: thin };
-  for (const r of [22, 24, 26]) {
-    tryUnmerge(`K${r}:M${r}`);
-    tryUnmerge(`K${r + 1}:M${r + 1}`);
-    ws.mergeCells(`I${r}:M${r + 1}`);
-  }
-  ws.mergeCells('I28:M28');
-  for (const [a, b] of [['N', 'O'], ['P', 'Q'], ['R', 'S'], ['T', 'W']]) ws.mergeCells(`${a}28:${b}28`);
+  // 금회청구 칸: 업체명은 위(작은 줄), 금액은 아래 줄 — 원래 청구서 양식과 같이
+  //   22·24·26행: I · J · K(K~M) 3칸 / 28행: I · J 2칸. 업체가 칸보다 많으면 마지막 칸을 '외 N곳'으로 묶음
+  const black = { name: '맑은 고딕', color: { argb: 'FF000000' } };
   [22, 24, 26, 28].forEach((r, i) => {
     const c = slots[i];
     set(`B${r}`, c ? c.name : null);
@@ -113,21 +88,23 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`D${r}`, c ? n(c.change) : null);
     set(`G${r}`, c ? n(c.exec) : null);
     set(`H${r}`, c ? n(c.prior) : null);
-    set(`I${r}`, c ? n(c.current) : null);
-    const small = r === 28; // 28행은 낮은 줄
-    const cur = ws.getCell(`I${r}`);
-    cur.font = { ...black, size: small ? 8 : 10, bold: true };
-    cur.numFmt = '#,##0';
-    cur.alignment = { horizontal: 'right', vertical: 'middle' };
-    cur.border = box;
-    V_COL.forEach((col, j) => {
-      const v = c && vCols[j] ? vCols[j].reduce((a, name) => a + (c.byVendor[name] ?? 0), 0) : 0;
-      const cell = ws.getCell(`${col}${r}`);
-      cell.value = n(v);
-      cell.numFmt = '#,##0';
-      cell.font = { ...black, size: small ? 8 : 9 };
-      cell.alignment = { horizontal: 'right', vertical: 'middle' };
-      cell.border = box;
+    const cols = r === 28 ? ['I', 'J'] : ['I', 'J', 'K'];
+    const list = c ? Object.entries(c.byVendor).filter(([, v]) => v).sort((x, y) => y[1] - x[1]) : [];
+    const cells: [string, number][] =
+      list.length <= cols.length
+        ? list
+        : [...list.slice(0, cols.length - 1), [`${list[cols.length - 1][0]} 외 ${list.length - cols.length}곳`, list.slice(cols.length - 1).reduce((t, x) => t + x[1], 0)]];
+    cols.forEach((col, j) => {
+      const nameCell = ws.getCell(`${col}${r}`);
+      const amtCell = ws.getCell(`${col}${r + 1}`);
+      const x = cells[j];
+      nameCell.value = x ? x[0] : null;
+      nameCell.font = { ...black, size: 7 };
+      nameCell.alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+      amtCell.value = x ? x[1] : null;
+      amtCell.numFmt = '#,##0';
+      amtCell.font = { ...black, size: 9 };
+      amtCell.alignment = { horizontal: 'center', vertical: 'middle' };
     });
   });
   addSummarySheet(wb, req, sum);
