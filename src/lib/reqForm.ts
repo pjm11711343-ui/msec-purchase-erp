@@ -10,6 +10,7 @@
 //   B32 날짜, I32 합계
 import type ExcelJS from 'exceljs';
 import type { Requisition } from '../types';
+import { bonNote } from './pipe';
 import { NO_VENDOR, type ReqSummary, type SumRow } from './reqSummary';
 
 export const ITEM_ROWS = [...Array.from({ length: 14 }, (_, i) => 7 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
@@ -65,7 +66,7 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`G${r}`, n(l.execQty));
     set(`H${r}`, n(l.priorQty));
     set(`I${r}`, n(l.reqQty));
-    set(`J${r}`, l.note || null);
+    set(`J${r}`, bonNote(l) || null);
     set(`K${r}`, n(l.orderQty || l.reqQty));
     set(`N${r}`, n(l.orderPrice));
     set(`P${r}`, n(amt(l)));

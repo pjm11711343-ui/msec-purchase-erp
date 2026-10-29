@@ -67,3 +67,5 @@ export function newLine(): ReqLine {
     orderPrice: 0,
   };
 }
+
+export { bonNote, bonText, pipeLength } from './pipe';

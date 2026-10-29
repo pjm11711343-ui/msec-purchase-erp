@@ -8,7 +8,7 @@ import { fillReqForm } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
-import { lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
+import { bonText, lastOrderPrice, lineAmount, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
 import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
@@ -402,6 +402,8 @@ export default function ReqEdit() {
     .map((c) => ({ itemName: c[0].trim(), spec: (c[1] ?? '').trim(), unit: (c[2] ?? '').trim(), reqQty: num(c[3]), remark: (c[4] ?? '').trim() || undefined, location: (c[5] ?? '').trim() || undefined }));
 
   const vendorOf = (vid?: string): Vendor | undefined => vendors.data.find((v) => v.id === vid);
+  /** 거래선 목록: 등록된 업체 전부 (사용 중인 업체 먼저) */
+  const vendorOptions = [...vendors.data].sort((a, b) => Number(a.active === false) - Number(b.active === false) || a.name.localeCompare(b.name, 'ko'));
   const catName = (cid?: string) => cats.data.find((c) => c.id === cid)?.name;
 
   /** 회사 청구서 양식(엑셀)으로 내려받기 */
@@ -765,7 +767,10 @@ export default function ReqEdit() {
                         {pq ? pq.toLocaleString() : ''}
                       </td>
 <td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, rowEd, 'w-full')}</td>
-                                            <td>{T(l.key, 'note', l.note, rowEd, 'w-full')}</td>
+                                            <td>
+                        {bonText(l) && <div className="pt-1 text-center text-[11.5px] font-semibold text-navy-900" title="금회청구 수량 ÷ 배관 1본 길이">{bonText(l)}</div>}
+                        {rowEd || l.note ? T(l.key, 'note', l.note, rowEd, 'w-full', { placeholder: bonText(l) ? '(비고)' : '' }) : null}
+                      </td>
 <td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, rowOrderEd, 'w-full')}</td>
                       <td className="num bg-amber-soft/40">
                         <div className="flex items-center justify-end gap-0.5">
@@ -790,13 +795,12 @@ export default function ReqEdit() {
                             }}
                           >
                             <option value="">-</option>
-                            {vendors.data
-                              .filter((v) => v.active)
-                              .map((v) => (
-                                <option key={v.id} value={v.id}>
-                                  {v.name}
-                                </option>
-                              ))}
+                            {vendorOptions.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.name}
+                                {v.active === false ? ' (사용 중지)' : ''}
+                              </option>
+                            ))}
                           </select>
                         ) : (
                           <span className="break-words">{l.vendorName}</span>
@@ -1049,7 +1053,8 @@ export default function ReqEdit() {
 
 /** 하단 요약: 자재분류별 계약·변경(예상)·실행·기반입·금회청구 + 업체별 금회청구 */
 function SummaryPanel({ sum }: { sum: ReqSummary }) {
-  const [onlyCur, setOnlyCur] = useState(false);
+  const [all, setAll] = useState(false);
+  const onlyCur = !all;
   const rows = onlyCur ? sum.rows.filter((r) => r.current) : sum.rows;
   const f = (v: number) => (v ? won(v) : '');
   const remain = (r: { exec: number; change: number; prior: number; current: number }) => (r.exec ? r.exec - r.prior - r.current : 0);
@@ -1058,9 +1063,9 @@ function SummaryPanel({ sum }: { sum: ReqSummary }) {
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5">
         <span className="font-semibold text-navy-950">자재분류 · 금회청구 업체별 금액</span>
         <span className="text-[12px] text-muted">기반입금액 = 이 청구서보다 먼저 올린 이 현장 청구서의 발주 금액 (발주된 줄은 발주서 금액)</span>
-        <label className="ml-auto flex items-center gap-1 text-[12px]">
-          <input type="checkbox" checked={onlyCur} onChange={(e) => setOnlyCur(e.target.checked)} /> 이번 청구 분류만
-        </label>
+        <button className="btn-ghost ml-auto h-7 text-[12px]" onClick={() => setAll(!all)}>
+          {all ? '청구 분류만 보기' : `전체 보기 (${sum.rows.length}개 분류)`}
+        </button>
       </div>
       {!rows.length ? (
         <Empty>현장 투입집계 분류가 없습니다. 기준정보 › 분류에서 현장 분류를 등록하세요.</Empty>

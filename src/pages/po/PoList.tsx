@@ -450,11 +450,12 @@ export default function PoList() {
                                       onChange={(e) => setVendorPick((m) => ({ ...m, [p.key]: e.target.value }))}
                                     >
                                       <option value="">거래선 선택</option>
-                                      {vendors.data
-                                        .filter((v) => v.active)
+                                      {[...vendors.data]
+                                        .sort((a, b) => Number(a.active === false) - Number(b.active === false) || a.name.localeCompare(b.name, 'ko'))
                                         .map((v) => (
                                           <option key={v.id} value={v.id}>
                                             {v.name}
+                                            {v.active === false ? ' (사용 중지)' : ''}
                                           </option>
                                         ))}
                                     </select>
