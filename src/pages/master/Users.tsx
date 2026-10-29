@@ -22,6 +22,16 @@ interface Form {
   sign: string; // 싸인 이미지 ('' = 없음)
 }
 
+/** 사용자 화면 칸 순서와 설명 */
+const ROLE_ORDER: Role[] = ['admin', 'material', 'executive', 'siteManager', 'siteStaff'];
+const ROLE_DESC: Record<Role, string> = {
+  admin: '모든 메뉴·사용자 관리',
+  material: '전체 현장 · 발주·계산서·기준정보',
+  executive: '결재와 열람만',
+  siteManager: '담당 현장 · 청구서 결재',
+  siteStaff: '담당 현장 · 청구서 작성',
+};
+
 const EMPTY: Form = { id: null, name: '', position: '', loginType: 'id', login: '', password: '', role: 'siteStaff', siteIds: [], active: true, sign: '' };
 
 export default function Users() {
@@ -84,23 +94,10 @@ export default function Users() {
     }
   };
 
-  const sorted = useMemo(() => [...users.data].sort((a, b) => Number(b.active) - Number(a.active)), [users.data]);
+  const sorted = useMemo(() => [...users.data].sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ko')), [users.data]);
+  const [tab, setTab] = useState<'all' | Role>('all');
 
-  return (
-    <div>
-      <PageHeader
-        title="사용자"
-        desc="현장소장·현장담당은 담당 현장의 데이터만 볼 수 있습니다. 관리자·자재부는 전체를 봅니다."
-        actions={
-          <button className="btn-primary" onClick={() => setForm({ ...EMPTY })}>
-            + 사용자 추가
-          </button>
-        }
-      />
-      <div className="card overflow-hidden">
-        {!sorted.length ? (
-          <Empty>{users.loading ? '불러오는 중…' : '사용자가 없습니다.'}</Empty>
-        ) : (
+  const table = (list: ErpUser[]) => (
           <table className="tbl">
             <thead>
               <tr>
@@ -115,7 +112,7 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((u) => (
+              {list.map((u) => (
                 <tr key={u.id} className={u.active ? '' : 'text-muted'}>
                   <td className="font-medium">{u.name}</td>
                   <td>{u.position}</td>
@@ -154,8 +151,58 @@ export default function Users() {
               ))}
             </tbody>
           </table>
-        )}
+  );
+
+  return (
+    <div>
+      <PageHeader
+        title="사용자"
+        desc="현장소장·현장담당은 담당 현장의 데이터만 볼 수 있습니다. 관리자·자재부는 전체를 봅니다."
+        actions={
+          <button className="btn-primary" onClick={() => setForm({ ...EMPTY })}>
+            + 사용자 추가
+          </button>
+        }
+      />
+      <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
+        {(['all', ...ROLE_ORDER] as const).map((k) => {
+          const n = k === 'all' ? sorted.length : sorted.filter((u) => u.role === k).length;
+          return (
+            <button
+              key={k}
+              className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium ${tab === k ? 'bg-navy-950 text-white' : 'text-muted hover:bg-canvas hover:text-ink'}`}
+              onClick={() => setTab(k)}
+            >
+              {k === 'all' ? '전체' : ROLE_LABEL[k]}
+              <span className={`ml-1.5 rounded-full px-1.5 text-[11px] ${tab === k ? 'bg-white/20' : 'bg-canvas'}`}>{n}</span>
+            </button>
+          );
+        })}
       </div>
+      {!sorted.length ? (
+        <div className="card overflow-hidden">
+          <Empty>{users.loading ? '불러오는 중…' : '사용자가 없습니다.'}</Empty>
+        </div>
+      ) : (
+        (tab === 'all' ? ROLE_ORDER : [tab]).map((r) => {
+          const list = sorted.filter((u) => u.role === r);
+          if (tab === 'all' && !list.length) return null;
+          return (
+            <div key={r} className="card mb-4 overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-line bg-[#f7f8fb] px-4 py-2.5">
+                <span className="font-semibold text-navy-950">{ROLE_LABEL[r]}</span>
+                <span className="text-[12px] text-muted">
+                  {list.length}명 · {ROLE_DESC[r]}
+                </span>
+                <button className="btn-ghost ml-auto h-7 text-[12px]" onClick={() => setForm({ ...EMPTY, role: r })}>
+                  + {ROLE_LABEL[r]} 추가
+                </button>
+              </div>
+              {list.length ? table(list) : <Empty>{ROLE_LABEL[r]} 사용자가 없습니다.</Empty>}
+            </div>
+          );
+        })
+      )}
 
       <Modal
         open={!!form}
