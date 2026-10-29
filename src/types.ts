@@ -176,6 +176,9 @@ export interface ReqLine {
   execQty: number; // 실행량
   priorQty: number; // 기반입 (저장 시점 계산값 — 이전 승인 청구 + 이관)
   priorQtyManual?: number; // 엑셀에서 받은 기반입 (이관용, 있으면 우선)
+  srcItem?: string; // 엑셀·붙여넣기에 적혀 있던 품명 (목록과 달라 바꾼 경우)
+  srcSpec?: string;
+  aliasHit?: boolean; // 기억된 다른 표기로 자동 인식
   reqQty: number; // 금회청구
   note?: string; // 본/(비고)
   orderQty: number; // 발주수량 (본사 작성)

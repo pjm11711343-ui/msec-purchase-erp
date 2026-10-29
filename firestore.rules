@@ -147,6 +147,11 @@ service cloud.firestore {
       allow read: if isErp();
       allow write: if isOffice();
     }
+    // 청구서 엑셀 품명·규격 다른 표기 (회사 공용, 자재부가 고친 것)
+    match /erp_reqAlias/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
     match /erp_auditLogs/{id} {
       allow create: if isErp() && request.resource.data.uid == request.auth.uid;
       allow read: if isAdmin();

@@ -50,6 +50,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { to: '/master/vendors', label: '업체', roles: OFFICE },
       { to: '/master/categories', label: '분류', roles: OFFICE },
       { to: '/master/prices', label: '단가 조회', roles: OFFICE },
+      { to: '/master/req-alias', label: '품명 다른 표기', roles: OFFICE },
       { to: '/master/users', label: '사용자', roles: ['admin'] },
       { to: '/master/approval', label: '결재선', roles: OFFICE },
       { to: '/master/settings', label: '설정', roles: ['admin'] },

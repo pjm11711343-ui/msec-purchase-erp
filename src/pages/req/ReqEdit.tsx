@@ -18,6 +18,8 @@ import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCata
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { signMap } from '../../lib/sign';
+import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
+import { similarity } from '../../lib/catMatch';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
 const TEMPLATES: Record<Requisition['approvalType'], string[]> = {
@@ -45,6 +47,10 @@ export default function ReqEdit() {
   const lines = useApprovalLines();
   const users = useUsers();
   const signs = useMemo(() => signMap(users.data), [users.data]);
+  const aliases = useReqAliases();
+  const aliasMap = useMemo(() => new Map(aliases.list.map((a) => [aliasKey(a.fromItem, a.fromSpec), a])), [aliases.list]);
+  // 엑셀에서 못 알아본 줄의 비슷한 품명·규격 후보 (줄 key → 후보)
+  const [cands, setCands] = useState<Record<string, { i: string; s: string }[]>>({});
   const prices = usePrices();
   const pos = usePurchaseOrders();
   const ordered = useMemo(() => orderedKeys(pos.data), [pos.data]);
@@ -210,14 +216,14 @@ export default function ReqEdit() {
     const l = d.lines.find((x) => x.key === key);
     if (!l || v === l.itemName) return;
     const keepSpec = !!l.spec && specOk(v, l.spec);
-    setLine(key, { itemName: v, ...(keepSpec ? {} : { spec: '' }), ...resetAuto(l) });
+    setLine(key, { itemName: v, aliasHit: undefined, ...(keepSpec ? {} : { spec: '' }), ...resetAuto(l) });
     autoPrice(key);
   };
   const pickSpec = (key: string, item: string, v: string) => {
     const l = d.lines.find((x) => x.key === key);
     if (!l || v === l.spec) return;
     const us = unitsOf(item, v);
-    setLine(key, { spec: v, ...(us?.size === 1 ? { unit: [...us][0] } : {}), ...resetAuto(l) });
+    setLine(key, { spec: v, aliasHit: undefined, ...(us?.size === 1 ? { unit: [...us][0] } : {}), ...resetAuto(l) });
     autoPrice(key);
   };
   /** 목록에 없는 품명·규격 줄 (엑셀·붙여넣기로 들어온 줄) */
@@ -251,6 +257,30 @@ export default function ReqEdit() {
     setBusy(true);
     try {
       const rid = d.id ?? newId(C.requisitions);
+      // 자재부·관리자가 고친 엑셀 표기 → 회사 공용 기억 (다음 불러오기 때 자동 인식)
+      if (isOffice) {
+        const learn = d.lines.filter(
+          (l) => l.srcItem && !l.aliasHit && l.itemName.trim() && !invalidLine(l) && aliasKey(l.srcItem, l.srcSpec ?? '') !== aliasKey(l.itemName, l.spec),
+        );
+        const seen = new Set<string>();
+        const items = learn
+          .filter((l) => {
+            const k = aliasKey(l.srcItem!, l.srcSpec ?? '');
+            if (seen.has(k)) return false;
+            seen.add(k);
+            const ex = aliasMap.get(k);
+            return !ex || ex.toItem !== l.itemName || ex.toSpec !== l.spec;
+          })
+          .map((l) => ({ fromItem: l.srcItem!, fromSpec: l.srcSpec ?? '', toItem: l.itemName.trim(), toSpec: l.spec.trim(), byName: profile?.name ?? '' }));
+        if (items.length) {
+          try {
+            await saveReqAliases(items);
+            toast(`고친 품명·규격 ${items.length}건을 기억했습니다. 다음 엑셀 불러오기부터 자동 인식합니다.`);
+          } catch {
+            /* 기억 저장이 실패해도 청구서 저장은 계속 */
+          }
+        }
+      }
       const data = build({ ...patch, history: [...d.history, { at: Date.now(), by: profile?.name ?? '', action, ...(comment ? { comment } : {}) }] });
       await commitBatch([{ type: 'set', col: C.requisitions, id: rid, data, merge: false }]);
       await audit(`구매청구 ${action}`, rid, { docNo: data.docNo, site: data.siteName });
@@ -269,7 +299,7 @@ export default function ReqEdit() {
     if (!d.lines.some((l) => l.itemName.trim())) return toast('품목을 한 줄 이상 입력하세요.', 'err');
     // 금회청구 수량이 비어 있어도 결재를 올릴 수 있다 (수량은 결재 중 자재부가 발주수량으로 정함)
     const wrong = d.lines.filter(invalidLine);
-    if (wrong.length) return toast(`목록에 없는 품명·규격이 ${wrong.length}줄 있습니다 (빨간 칸). 목록에서 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
+    if (wrong.length) return toast(`내역·규격 수정 요함 ${wrong.length}줄 (빨간 칸) — 목록에서 품명·규격을 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
     // 결재자 미지정 칸은 건너뜀
     const steps: ApprovalStepState[] = d.steps.map((s) => (s.userId ? { label: s.label, userId: s.userId, userName: s.userName } : { label: s.label, result: 'skipped' }));
     const first = nextActive(steps, 0);
@@ -352,9 +382,44 @@ export default function ReqEdit() {
     }
   };
 
+  /** 엑셀·붙여넣기 품명·규격 인식: 목록 표기(띄어쓰기·흔한 표기 차이 무시) → 기억된 다른 표기 → 못 찾으면 수정 요함 */
+  const recognize = (l: ReqLine): ReqLine => {
+    const item = l.itemName.trim();
+    const spec = (l.spec ?? '').trim();
+    if (!item) return l;
+    const ni = normItem(item);
+    const okItem = itemSet.has(ni);
+    if (okItem && (!spec || specOk(item, spec))) {
+      const stdItem = lists.items.get(ni) ?? item;
+      const stdSpec = spec ? (lists.specs.get(ni)?.get(normSpec(spec)) ?? spec) : '';
+      return { ...l, itemName: stdItem, spec: stdSpec };
+    }
+    const a = aliasMap.get(aliasKey(item, spec));
+    if (a && itemSet.has(normItem(a.toItem))) return { ...l, itemName: a.toItem, spec: a.toSpec, srcItem: item, srcSpec: spec, aliasHit: true };
+    return { ...l, srcItem: item, srcSpec: spec, aliasHit: undefined };
+  };
+  /** 비슷한 품명·규격 후보 3개 */
+  const suggestPairs = (item: string, spec: string): { i: string; s: string }[] => {
+    const ni = normItem(item);
+    const scored = itemOptions.map((o) => ({ o, sc: similarity(ni, normItem(o)) })).filter((x) => x.sc > 0.3);
+    scored.sort((a, b) => b.sc - a.sc);
+    const out: { i: string; s: string; sc: number }[] = [];
+    for (const { o, sc } of scored.slice(0, 6)) {
+      const specs = specOptions(o);
+      if (!specs.length) out.push({ i: o, s: '', sc });
+      else {
+        const best = specs.map((s) => ({ s, v: spec ? (normSpec(spec) === normSpec(s) ? 1 : similarity(normSpec(spec), normSpec(s))) : 0 })).sort((a, b) => b.v - a.v)[0];
+        out.push({ i: o, s: best.s, sc: sc * 0.7 + best.v * 0.3 });
+      }
+    }
+    return out.sort((a, b) => b.sc - a.sc).slice(0, 3).map(({ i, s }) => ({ i, s }));
+  };
+
   const addFromRows = (rows: Partial<ReqLine>[]) => {
+    const nextCands: Record<string, { i: string; s: string }[]> = {};
     const added = rows.map((r) => {
-      const l = { ...newLine(), ...r } as ReqLine;
+      const l = recognize({ ...newLine(), ...r } as ReqLine);
+      if (l.srcItem && !l.aliasHit) nextCands[l.key] = suggestPairs(l.srcItem, l.srcSpec ?? '');
       if (l.vendorName && !l.vendorId) {
         const v = vendors.data.find((x) => sameVendor(l.vendorName!, x.name, x.aliases));
         if (v) Object.assign(l, { vendorId: v.id, vendorName: v.name });
@@ -363,6 +428,8 @@ export default function ReqEdit() {
       return l;
     });
     setD((x) => x && { ...x, lines: [...x.lines.filter((l) => l.itemName.trim()), ...added] });
+    setCands((c) => ({ ...c, ...nextCands }));
+    return { fix: added.filter((l) => l.srcItem && !l.aliasHit && invalidLine(l)).length, auto: added.filter((l) => l.aliasHit).length };
   };
 
   /** 청구서에 적힌 현장 표기 → ERP 현장 (이름·정식명·다른 표기·묶음명 + 기계/소방 구분) */
@@ -402,9 +469,10 @@ export default function ReqEdit() {
         }
       } else if (many) siteMsg = ` "${p.siteLabel}"에 맞는 현장이 여러 개입니다(${many.map((s) => s.name).join(', ')}). 현장을 직접 고르세요.`;
       else if (!site && p.siteLabel) siteMsg = ` 청구서 현장명 "${p.siteLabel}"과 맞는 현장을 찾지 못했습니다. 현장을 직접 고르세요.`;
-      addFromRows(p.lines);
+      const rec = addFromRows(p.lines);
       setD((x) => x && { ...x, purpose: x.purpose || p.purpose, requestDate: x.requestDate || p.docDate || today() });
-      toast(`${p.lines.length}줄을 가져왔습니다.${siteMsg}`, !site && p.siteLabel ? 'err' : undefined);
+      const recMsg = (rec.auto ? ` 다른 표기 ${rec.auto}줄은 기준 품명·규격으로 자동 인식했습니다.` : '') + (rec.fix ? ` ${rec.fix}줄은 품명·규격을 알아보지 못했습니다 — "내역·규격 수정 요함" 줄을 고쳐 주세요.` : '');
+      toast(`${p.lines.length}줄을 가져왔습니다.${recMsg}${siteMsg}`, rec.fix || (!site && p.siteLabel) ? 'err' : undefined);
     } catch (e) {
       toast(errMsg(e), 'err');
     }
@@ -756,6 +824,37 @@ export default function ReqEdit() {
                         ) : (
                           <span className="break-words">{l.itemName}</span>
                         )}
+                        {l.srcItem && (invalidLine(l) ? (
+                          <div className="mt-0.5 text-[10.5px] leading-tight">
+                            <div className="font-semibold text-red-600">내역·규격 수정 요함</div>
+                            <div className="text-muted">엑셀: {l.srcItem} {l.srcSpec}</div>
+                            {rowEd && (cands[l.key] ?? []).length > 0 && (
+                              <div className="mt-0.5 flex flex-wrap gap-1">
+                                {(cands[l.key] ?? []).map((c) => (
+                                  <button
+                                    key={`${c.i}|${c.s}`}
+                                    className="rounded border border-navy-900/20 bg-white px-1 py-0.5 text-navy-900 hover:bg-amber-soft"
+                                    title="이 품명·규격으로 바꾸기"
+                                    onClick={() => {
+                                      setLine(l.key, { itemName: c.i, spec: c.s, ...resetAuto(l) });
+                                      autoPrice(l.key);
+                                    }}
+                                  >
+                                    {c.i} {c.s}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : l.aliasHit ? (
+                          <div className="mt-0.5 text-[10.5px] leading-tight text-sky-700" title={`엑셀: ${l.srcItem} ${l.srcSpec ?? ''}`}>
+                            다른 표기 자동 인식 (엑셀: {l.srcItem} {l.srcSpec})
+                          </div>
+                        ) : (
+                          <div className="mt-0.5 text-[10.5px] leading-tight text-emerald-700" title={`엑셀: ${l.srcItem} ${l.srcSpec ?? ''}`}>
+                            수정됨 (엑셀: {l.srcItem} {l.srcSpec}){isOffice && editable ? ' · 저장하면 기억' : ''}
+                          </div>
+                        ))}
                       </td>
                       <td>
                         {rowEd ? (
