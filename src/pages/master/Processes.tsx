@@ -12,6 +12,7 @@ export default function Processes() {
   const pm = useProcessMaster();
   const toast = useToast();
   const [m, setM] = useState<ProcessMaster | null>(null);
+  const [adding, setAdding] = useState<{ zoneId: string; name: string } | null>(null); // 구역 줄에서 공종 바로 추가
   useEffect(() => {
     if (!pm.loading && !m) setM(structuredClone(pm.master));
   }, [pm.loading, pm.master, m]);
@@ -28,6 +29,21 @@ export default function Processes() {
     if (j < 0 || j >= s.length) return list;
     [s[i], s[j]] = [s[j], s[i]];
     return s.map((x, k) => ({ ...x, order: k + 1 }));
+  };
+  /** 구역 줄에서 공종 추가: 같은 이름이 있으면 그 공종을 켜고, 없으면 새 공종을 만들어 이 구역에 켠다 */
+  const addTradeTo = () => {
+    if (!adding) return;
+    const name = adding.name.trim();
+    if (!name) return setAdding(null);
+    const ex = m.trades.find((t) => t.name.replace(/\s/g, '') === name.replace(/\s/g, ''));
+    const tid = ex?.id ?? `t${newKey()}`;
+    setM({
+      ...m,
+      trades: ex ? m.trades : [...m.trades, { id: tid, name, order: m.trades.length + 1, keywords: [name] }],
+      zones: m.zones.map((z) => (z.id === adding.zoneId && !z.defaultTrades.includes(tid) ? { ...z, defaultTrades: [...z.defaultTrades, tid] } : z)),
+    });
+    setAdding(null);
+    toast(ex ? `"${name}"을(를) 이 구역 기본 공종으로 켰습니다.` : `새 공종 "${name}"을(를) 만들고 이 구역에 켰습니다. 저장을 눌러야 반영됩니다.`);
   };
   const save = async () => {
     if (m.zones.some((z) => !z.name.trim()) || m.trades.some((t) => !t.name.trim())) return toast('이름이 빈 구역·공종이 있습니다.', 'err');
@@ -93,7 +109,7 @@ export default function Processes() {
                   <td>
                     <input className="input h-7 w-32 px-1.5 font-medium" value={z.name} onChange={(e) => setZone(z.id, { name: e.target.value })} />
                   </td>
-                  <td className="whitespace-nowrap">
+                  <td className="max-w-[320px]">
                     {trades.map((t) => (
                       <label key={t.id} className="mr-2 inline-flex items-center gap-1 text-[12.5px]">
                         <input
@@ -104,6 +120,28 @@ export default function Processes() {
                         {t.name}
                       </label>
                     ))}
+                    {adding?.zoneId === z.id ? (
+                      <span className="inline-flex items-center gap-1">
+                        <input
+                          autoFocus
+                          className="input h-6 w-24 px-1.5 text-[12px]"
+                          placeholder="공종 이름"
+                          value={adding.name}
+                          onChange={(e) => setAdding({ ...adding, name: e.target.value })}
+                          onKeyDown={(e) => (e.key === 'Enter' ? addTradeTo() : e.key === 'Escape' ? setAdding(null) : null)}
+                        />
+                        <button className="text-[12px] font-medium text-sky-700 hover:underline" onClick={addTradeTo}>
+                          추가
+                        </button>
+                        <button className="text-[12px] text-muted hover:text-ink" onClick={() => setAdding(null)}>
+                          취소
+                        </button>
+                      </span>
+                    ) : (
+                      <button className="text-[12px] text-sky-700 hover:underline" title="공종 추가 (예: 급수급탕, 냉각수)" onClick={() => setAdding({ zoneId: z.id, name: '' })}>
+                        + 공종
+                      </button>
+                    )}
                   </td>
                   <td>
                     <input className="input h-7 w-40 px-1.5" placeholder="예: 복도, 입상, 동지하" value={(z.subs ?? []).join(', ')} onChange={(e) => setZone(z.id, { subs: words(e.target.value) })} />
