@@ -176,6 +176,10 @@ service cloud.firestore {
       allow read: if canRead(resource.data.siteId);
       allow write: if isOffice();
     }
+    // 관리자 전용 줄 메모: 관리자(admin)만 읽고 씀
+    match /erp_adminMemos/{id} {
+      allow read, write: if isAdmin();
+    }
     match /erp_itemCats/{id} {
       allow read: if isErp();
       allow write: if isOffice();

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -17,6 +18,8 @@ import { signMap } from '../../lib/sign';
 import { commaText, errMsg, useToast } from '../../components/ui';
 import { PoChip, PreChip } from './PoList';
 import type { PoLine, PurchaseOrder, Site } from '../../types';
+import { useAdminMemos } from '../../lib/adminMemo';
+import AdminMemoInput from '../../components/AdminMemoInput';
 
 export const MIN_ROWS = 18;
 
@@ -39,6 +42,7 @@ export default function PoDetail() {
   const { profile, can } = useAuth();
   const nav = useNavigate();
   const isOffice = can('admin', 'material');
+  const adminMemo = useAdminMemos(); // 관리자 전용 줄 메모
   const pos = usePurchaseOrders();
   const reqs = useRequisitions();
   const prices = usePoPrices();
@@ -408,7 +412,15 @@ export default function PoDetail() {
         );
       })()}
 
-      <PoSheet po={po} site={site} boxes={b} internal={internal} showPrice={showPrice} pad={pad} />
+      <PoSheet
+        po={po}
+        site={site}
+        boxes={b}
+        internal={internal}
+        showPrice={showPrice}
+        pad={pad}
+        memoCell={adminMemo.isAdmin ? (l) => <AdminMemoInput reqId={l.reqId} lineKey={l.lineKey} itemName={l.itemName} spec={l.spec} memos={adminMemo.map} className="h-6" /> : undefined}
+      />
       {pdfMode && (
         // 메일 첨부용 발주서 (업체용: 결재란 2칸, 단가 표시) — 화면 밖에 그려서 PDF로
         <div style={{ position: 'fixed', left: -10000, top: 0, width: 800, background: '#fff' }} aria-hidden>
@@ -455,6 +467,7 @@ export function PoSheet({
   internal,
   showPrice,
   pad,
+  memoCell,
 }: {
   po: PurchaseOrder;
   site?: Site;
@@ -462,11 +475,14 @@ export function PoSheet({
   internal: boolean;
   showPrice: boolean;
   pad: number;
+  /** 관리자 메모 칸 (화면에만, 인쇄·PDF에는 안 나옴) */
+  memoCell?: (l: PurchaseOrder['lines'][number]) => ReactNode;
 }) {
+  const memoCls = 'no-print border border-violet-300 bg-violet-50 px-1 py-0.5';
   const cell = 'border border-black px-2 py-1';
   const head = `${cell} bg-[#f2f2f2] text-center font-semibold whitespace-nowrap`;
   return (
-    <div className="po-sheet mx-auto w-[794px] bg-white p-8 text-[12px] text-black shadow-sm print:w-auto print:p-0 print:shadow-none">
+    <div className={`po-sheet mx-auto ${memoCell ? 'w-[980px]' : 'w-[794px]'} bg-white p-8 text-[12px] text-black shadow-sm print:w-auto print:p-0 print:shadow-none`}>
       <table className="w-full border-collapse">
         <tbody>
           <tr>
@@ -536,6 +552,7 @@ export function PoSheet({
             {showPrice && <th className={`${head} w-20`}>단 가</th>}
             {showPrice && <th className={`${head} w-24`}>금 액</th>}
             <th className={head}>비 고</th>
+            {memoCell && <th className={`${memoCls} w-44 text-center font-semibold text-violet-800`}>관리자 메모</th>}
           </tr>
         </thead>
         <tbody>
@@ -549,6 +566,7 @@ export function PoSheet({
               {showPrice && <td className={`${cell} text-right tabular-nums`}>{l.price ? won(l.price) : ''}</td>}
               {showPrice && <td className={`${cell} text-right tabular-nums`}>{l.amount ? won(l.amount) : ''}</td>}
               <td className={`${cell} text-[11px]`}>{[l.location, l.remark, l.dueDate ? `납기 ${l.dueDate}` : ''].filter(Boolean).join(' / ')}</td>
+              {memoCell && <td className={memoCls}>{memoCell(l)}</td>}
             </tr>
           ))}
           {Array.from({ length: pad }, (_, i) => (
@@ -556,6 +574,7 @@ export function PoSheet({
               {Array.from({ length: showPrice ? 8 : 6 }, (_, j) => (
                 <td key={j} className={`${cell} h-[22px]`} />
               ))}
+              {memoCell && <td className={memoCls} />}
             </tr>
           ))}
           {showPrice && (
@@ -565,6 +584,7 @@ export function PoSheet({
               </td>
               <td className={`${cell} text-right font-semibold tabular-nums`}>{won(po.totalAmount)}</td>
               <td className={cell} />
+              {memoCell && <td className={memoCls} />}
             </tr>
           )}
         </tbody>

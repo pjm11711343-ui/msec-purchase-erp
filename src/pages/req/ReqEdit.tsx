@@ -20,6 +20,8 @@ import { normItem, normSpec } from '../../lib/itemNorm';
 import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { cellKey, defaultCells, processLabel, processPriorMap, sortedTrades, sortedZones, useBaseSheets, useProcessMaster, useSiteProcess, type BaseLine } from '../../lib/process';
 import { signMap } from '../../lib/sign';
+import { useAdminMemos } from '../../lib/adminMemo';
+import AdminMemoInput from '../../components/AdminMemoInput';
 import { notifyQuiet } from '../../lib/notify';
 import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
 import { similarity } from '../../lib/catMatch';
@@ -50,6 +52,7 @@ export default function ReqEdit() {
   const reqs = useRequisitions();
   const lines = useApprovalLines();
   const users = useUsers();
+  const adminMemo = useAdminMemos(); // 관리자 전용 줄 메모 (관리자만 읽음)
   const signs = useMemo(() => signMap(users.data), [users.data]);
   const aliases = useReqAliases();
   const aliasMap = useMemo(() => new Map(aliases.list.map((a) => [aliasKey(a.fromItem, a.fromSpec), a])), [aliases.list]);
@@ -1018,6 +1021,7 @@ export default function ReqEdit() {
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '7%' }} />
                 <col style={{ width: '4%' }} />
+                {adminMemo.isAdmin && <col style={{ width: '9%' }} />}
                 <col style={{ width: 36 }} />
               </colgroup>
               <thead className="text-center">
@@ -1040,6 +1044,13 @@ export default function ReqEdit() {
                     <br />
                     잔여
                   </th>
+                  {adminMemo.isAdmin && (
+                    <th rowSpan={2} className="bg-violet-50 text-center leading-tight text-violet-800" title="관리자만 보이는 메모 (인쇄·엑셀·다른 사용자에게 안 보임)">
+                      관리자
+                      <br />
+                      메모
+                    </th>
+                  )}
                   <th rowSpan={2}></th>
                 </tr>
                 <tr>
@@ -1191,6 +1202,11 @@ export default function ReqEdit() {
                         )}
                       </td>
                       <td className={`num pt-2 ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}>{remain == null ? '' : remain.toLocaleString()}</td>
+                      {adminMemo.isAdmin && (
+                        <td>
+                          {l.itemName && <AdminMemoInput reqId={d.id} lineKey={l.key} itemName={l.itemName} spec={l.spec} memos={adminMemo.map} />}
+                        </td>
+                      )}
                       <td className="pt-1.5">
                         {d.id && ordered.get(`${d.id}|${l.key}`) && (
                           <Link to={`/po/${ordered.get(`${d.id}|${l.key}`)!.id}`} className="block truncate text-[10.5px] text-emerald-700 hover:underline" title={ordered.get(`${d.id}|${l.key}`)!.poNo}>
@@ -1211,7 +1227,7 @@ export default function ReqEdit() {
                     합계
                   </td>
                   <td className="num">{won(d.lines.reduce((a, l) => a + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }), 0))}</td>
-                  <td colSpan={6}></td>
+                  <td colSpan={adminMemo.isAdmin ? 7 : 6}></td>
                 </tr>
               </tbody>
             </table>
