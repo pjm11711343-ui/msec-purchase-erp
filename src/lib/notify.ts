@@ -1,7 +1,7 @@
 // 알림 보내기 (서버 /api/notify): 업체 메일(발주서 PDF) · 텔레그램
 import { auth } from './firebase';
 
-export type NotifyEvent = 'po_sent' | 'po_changed' | 'po_cancelled' | 'po_ack' | 'receipt' | 'approval_turn';
+export type NotifyEvent = 'po_sent' | 'po_changed' | 'po_cancelled' | 'po_ack' | 'receipt' | 'approval_turn' | 'rfq_sent';
 export interface NotifyResult {
   ok: boolean;
   error?: string;

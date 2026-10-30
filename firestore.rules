@@ -180,6 +180,23 @@ service cloud.firestore {
     match /erp_adminMemos/{id} {
       allow read, write: if isAdmin();
     }
+    // 견적 의뢰: 업체는 자기에게 온 의뢰서와 자기 견적만. 마감 전까지 제출·수정, 단가표 반영 표시는 못 바꿈
+    match /erp_rfqs/{id} {
+      allow read: if isOffice() || (isVendor() && myVendor() in resource.data.vendorIds);
+      allow write: if isOffice();
+    }
+    match /erp_rfqQuotes/{id} {
+      allow read: if isOffice() || (isVendor() && resource.data.vendorId == myVendor());
+      allow create, update: if isOffice() || (isVendor()
+        && request.resource.data.vendorId == myVendor()
+        && id == request.resource.data.rfqId + '_' + myVendor()
+        && (resource == null || resource.data.vendorId == myVendor())
+        && request.resource.data.get('appliedAt', 0) == (resource == null ? 0 : resource.data.get('appliedAt', 0))
+        && request.resource.data.by == 'vendor'
+        && get(/databases/$(database)/documents/erp_rfqs/$(request.resource.data.rfqId)).data.status == 'sent'
+        && myVendor() in get(/databases/$(database)/documents/erp_rfqs/$(request.resource.data.rfqId)).data.vendorIds);
+      allow delete: if isOffice();
+    }
     match /erp_itemCats/{id} {
       allow read: if isErp();
       allow write: if isOffice();

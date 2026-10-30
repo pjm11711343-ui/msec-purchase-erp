@@ -8,6 +8,8 @@ import { won } from '../../lib/normalize';
 import { poProgress, receivedMap, useReceipts, useVendorPOs } from '../../lib/receipts';
 import ReceiptPanel from '../../components/ReceiptPanel';
 import VendorStatement from './VendorStatement';
+import VendorRfq from './VendorRfq';
+import { useVendorRfqs } from '../../lib/rfq';
 import { Empty, errMsg, RateBar, useToast } from '../../components/ui';
 import { MIN_ROWS, PoSheet, signBoxes } from '../po/PoDetail';
 import type { Invoice, Site } from '../../types';
@@ -22,7 +24,9 @@ export default function VendorPortal() {
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<'receipt' | 'sheet'>('receipt');
   const [filter, setFilter] = useState<'open' | 'all'>('open');
-  const [page, setPage] = useState<'po' | 'statement'>('po');
+  const [page, setPage] = useState<'po' | 'statement' | 'rfq'>('po');
+  const vr = useVendorRfqs(vendor?.vendorId);
+  const newRfq = vr.rfqs.data.filter((r) => r.status === 'sent' && !vr.quotes.data.some((q) => q.rfqId === r.id && q.status === 'submitted')).length;
   const rec = useMemo(() => receivedMap(receipts.data), [receipts.data]);
 
   const list = pos.data
@@ -70,14 +74,17 @@ export default function VendorPortal() {
       </header>
       <div className="mx-auto max-w-[1280px] p-5">
         <div className="no-print mb-4 flex gap-1">
-          {(['po', 'statement'] as const).map((t) => (
+          {(['po', 'statement', 'rfq'] as const).map((t) => (
             <button key={t} className={`rounded-md px-4 py-1.5 text-[13px] font-semibold ${page === t ? 'bg-navy-950 text-white' : 'bg-white text-muted hover:text-ink'}`} onClick={() => (setPage(t), setOpen(null))}>
-              {t === 'po' ? '발주서 · 입고' : '거래명세서'}
+              {t === 'po' ? '발주서 · 입고' : t === 'statement' ? '거래명세서' : '견적 요청'}
+              {t === 'rfq' && newRfq > 0 && <span className="ml-1.5 rounded-full bg-amber-brand px-1.5 text-[11px] text-navy-950">{newRfq}</span>}
             </button>
           ))}
         </div>
         {page === 'statement' ? (
           <VendorStatement />
+        ) : page === 'rfq' ? (
+          <VendorRfq />
         ) : !cur ? (
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">

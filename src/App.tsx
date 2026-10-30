@@ -22,6 +22,7 @@ import Prices from './pages/master/Prices';
 import ReqAliases from './pages/master/ReqAliases';
 import ItemsPrices from './pages/master/ItemsPrices';
 import Processes from './pages/master/Processes';
+import RfqPage from './pages/rfq/RfqPage';
 import ProcessBoard from './pages/process/ProcessBoard';
 import Users from './pages/master/Users';
 import Approval from './pages/master/Approval';
@@ -88,6 +89,8 @@ export default function App() {
         <Route path="master/prices" element={<Guard roles={OFFICE}><Prices /></Guard>} />
         <Route path="master/processes" element={<Guard roles={OFFICE}><Processes /></Guard>} />
         <Route path="process" element={<ProcessBoard />} />
+        <Route path="rfq" element={<Guard roles={OFFICE}><RfqPage /></Guard>} />
+        <Route path="rfq/:id" element={<Guard roles={OFFICE}><RfqPage /></Guard>} />
         <Route path="master/items-prices" element={<Guard roles={OFFICE}><ItemsPrices /></Guard>} />
         <Route path="master/req-alias" element={<Guard roles={OFFICE}><ReqAliases /></Guard>} />
         <Route path="master/users" element={<Guard roles={['admin']}><Users /></Guard>} />

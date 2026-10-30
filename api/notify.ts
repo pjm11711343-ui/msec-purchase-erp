@@ -5,6 +5,7 @@
 //  po_ack        업체 발주 확인 → 자재부 텔레그램                            (업체)
 //  receipt       입고 등록 → 현장 단톡방                                    (업체·사내)
 //  approval_turn 청구서 결재 차례 → 결재자 개인 텔레그램                      (사내)
+//  rfq_sent      견적 의뢰 → 업체 메일(의뢰서 PDF·포털 링크)                 (자재부·관리자)
 import { esc, fail, getDoc, HttpError, sendMail, sendTelegram, verifyUser, type Res } from './_lib/common.js';
 
 interface Req {
@@ -130,6 +131,44 @@ export default async function handler(req: Req, res: Res) {
         `📝 <b>결재 차례</b> ${esc(ap?.name ?? '')}님 (${esc(step)})\n${esc(r.siteName)} 구매청구서 ${esc(r.docNo || r.requestDate)}\n작성 ${esc(r.createdByName ?? '')}${r.totalAmount ? ` · ${won(r.totalAmount)}원` : ''}\n${origin}/req/${id}`,
       );
       return res.status(200).json({ ok: true, telegram: sent });
+    }
+
+    if (event === 'rfq_sent') {
+      if (!office) throw new HttpError(403, '견적 의뢰 메일은 자재부·관리자만 보낼 수 있습니다.');
+      const rid = String(body.rfqId ?? '');
+      const vid = String(body.vendorId ?? '');
+      const rfq = rid && (await getDoc<{ rfqNo: string; title: string; siteName?: string; deliveryPlace?: string; note?: string; lines: { itemName: string; spec?: string; unit?: string; qty: number }[] }>(me.token, `erp_rfqs/${rid}`));
+      if (!rfq) throw new HttpError(404, '견적 의뢰서를 찾을 수 없습니다.');
+      const vendor = vid && (await getDoc<{ name: string; email?: string; contactName?: string }>(me.token, `erp_vendors/${vid}`));
+      if (!vendor) throw new HttpError(404, '업체를 찾을 수 없습니다.');
+      const to = String(body.to ?? vendor.email ?? '').trim();
+      if (!to) return res.status(200).json({ ok: true, email: 'no-email' });
+      const text = [
+        `${vendor.name} ${vendor.contactName ? `${vendor.contactName} ` : ''}담당자님 안녕하세요.`,
+        `㈜명신기공 ${who}입니다.`,
+        '',
+        `아래 품목의 견적을 부탁드립니다. (${rfq.rfqNo}${rfq.title ? ` · ${rfq.title}` : ''})`,
+        rfq.siteName ? `■ 현장: ${rfq.siteName}` : '',
+        rfq.deliveryPlace ? `■ 납품 장소: ${rfq.deliveryPlace}` : '',
+        rfq.note ? `■ 안내: ${rfq.note}` : '',
+        '',
+        `■ 품목 (${rfq.lines.length}건)\n${lineText(rfq.lines as Line[], 15)}`,
+        '',
+        `업체 포털 "견적 요청" 메뉴에서 품목별 단가를 입력해 제출해 주세요: ${origin}/?vendor`,
+        '(업체코드·접속코드로 로그인) 견적서 파일로 회신하셔도 됩니다.',
+        '',
+        '감사합니다.',
+      ]
+        .filter((x, i, a) => x !== '' || a[i - 1] !== '')
+        .join('\n');
+      const pdf = typeof body.pdfBase64 === 'string' && body.pdfBase64 ? Buffer.from(body.pdfBase64, 'base64') : undefined;
+      await sendMail({
+        to,
+        subject: `[명신기공 견적 의뢰] ${rfq.rfqNo}${rfq.siteName ? ` ${rfq.siteName}` : ''} (${vendor.name})`,
+        text,
+        ...(pdf ? { attachments: [{ filename: `견적의뢰서_${rfq.rfqNo}_${vendor.name}.pdf`, content: pdf }] } : {}),
+      });
+      return res.status(200).json({ ok: true, email: 'sent', to });
     }
 
     throw new HttpError(400, `알 수 없는 알림 종류: ${event}`);

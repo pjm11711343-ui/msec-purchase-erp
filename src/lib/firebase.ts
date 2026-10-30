@@ -74,6 +74,8 @@ export const C = {
   reqAlias: 'erp_reqAlias',
   items: 'erp_items',
   itemCats: 'erp_itemCats',
+  rfqs: 'erp_rfqs', // 견적 의뢰서
+  rfqQuotes: 'erp_rfqQuotes', // 업체 견적 (id = 의뢰서id_업체id)
   adminMemos: 'erp_adminMemos', // 관리자 전용 줄 메모 (id = 청구서id_줄key)
   processMaster: 'erp_processMaster', // 구역·공종 공통 목록 (main)
   siteProcess: 'erp_siteProcess', // 현장 공정 설정 (id = siteId)
