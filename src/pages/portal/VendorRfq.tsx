@@ -66,6 +66,14 @@ export default function VendorRfq() {
           {myQ(cur)?.status === 'submitted' && <span className="chip bg-emerald-50 text-emerald-700">제출함 {myQ(cur)?.submittedAt ? new Date(myQ(cur)!.submittedAt!).toLocaleDateString('ko-KR') : ''}</span>}
         </div>
         {cur.note && <div className="border-b border-line bg-amber-soft/50 px-4 py-2 text-[12.5px]">안내: {cur.note}</div>}
+        {cur.guide && (
+          <div className="border-b border-line bg-sky-50 px-4 py-2 text-[12.5px] leading-relaxed text-sky-900">
+            <div className="mb-0.5 font-semibold">※ 견적 작성 안내</div>
+            {cur.guide.split('\n').map((x, i) => (
+              <div key={i}>{x}</div>
+            ))}
+          </div>
+        )}
         <div className="overflow-auto">
           <table className="tbl text-[12.5px]">
             <thead>

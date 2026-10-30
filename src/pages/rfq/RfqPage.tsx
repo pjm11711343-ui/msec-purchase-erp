@@ -15,7 +15,7 @@ import { nameKey, num, won } from '../../lib/normalize';
 import { notify } from '../../lib/notify';
 import { readWorkbook } from '../../lib/parsers';
 import { elementToPdfBase64 } from '../../lib/poPdf';
-import { applyQuotes, nextRfqNo, quoteId, useQuotes, useRfqs, type QuoteLine, type Rfq, type RfqLine, type RfqQuote } from '../../lib/rfq';
+import { applyQuotes, DEFAULT_RFQ_GUIDE, nextRfqNo, quoteId, useQuotes, useRfqs, type QuoteLine, type Rfq, type RfqLine, type RfqQuote } from '../../lib/rfq';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
 import type { Vendor } from '../../types';
 
@@ -131,7 +131,7 @@ function RfqDetail({ id }: { id: string }) {
   useEffect(() => {
     if (d) return;
     if (isNew && !rfqs.loading) {
-      setD({ rfqNo: nextRfqNo(rfqs.data), title: '', scope: 'common', lines: [{ key: lineKey(), itemName: '', spec: '', unit: '', qty: 0 }], vendorIds: [], status: 'draft', createdAt: Date.now(), createdByName: who, updatedAt: Date.now() });
+      setD({ rfqNo: nextRfqNo(rfqs.data), title: '', scope: 'common', guide: DEFAULT_RFQ_GUIDE, lines: [{ key: lineKey(), itemName: '', spec: '', unit: '', qty: 0 }], vendorIds: [], status: 'draft', createdAt: Date.now(), createdByName: who, updatedAt: Date.now() });
     } else if (stored) setD(structuredClone(stored));
   }, [isNew, rfqs.loading, rfqs.data, stored, d, who]);
   // 저장된 뒤 다른 곳에서 바뀌면 (작성 중이 아닐 때) 최신으로
@@ -298,6 +298,7 @@ function RfqDetail({ id }: { id: string }) {
         return [i + 1, l.itemName, l.spec, l.unit, l.qty || '', ...(forVendor ? ['', '', ''] : ps.flatMap((p) => [p?.price || '', p?.maker ?? ''])), ...(forVendor ? [] : [min?.p ?? '', min ? vName(min.v) : ''])];
       }),
     ];
+    if (forVendor && d.guide) aoa.push([], ['※ 견적 작성 안내'], ...d.guide.split('\n').map((x) => [x]));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = [5, 26, 16, 6, 8, ...Array(Math.max(3, vs.length * 2 + 2)).fill(12)].map((wch) => ({ wch }));
     const wb = XLSX.utils.book_new();
@@ -374,6 +375,16 @@ function RfqDetail({ id }: { id: string }) {
           <div className="col-span-2">
             <Field label="업체 안내 문구">
               <input className="input" disabled={!editable} value={d.note ?? ''} placeholder="예: VAT 별도, 운반비 포함 단가로" onChange={(e) => setD({ ...d, note: e.target.value })} />
+            </Field>
+          </div>
+          <div className="col-span-2 md:col-span-4">
+            <Field label="견적 작성 안내 (업체에 보임 — 의뢰서 PDF·메일·업체 포털)" hint="업체가 품명·규격을 바꿔 적지 않도록 기본 안내가 들어 있습니다. 필요하면 고쳐 쓰세요.">
+              <textarea className="input h-28 w-full text-[12.5px] leading-relaxed" disabled={!editable} value={d.guide ?? ''} onChange={(e) => setD({ ...d, guide: e.target.value })} />
+              {editable && d.guide !== DEFAULT_RFQ_GUIDE && (
+                <button className="mt-1 text-[11.5px] text-sky-700 hover:underline" onClick={() => setD({ ...d, guide: DEFAULT_RFQ_GUIDE })}>
+                  기본 안내로 되돌리기
+                </button>
+              )}
             </Field>
           </div>
           <div className="col-span-2">
@@ -753,6 +764,14 @@ export function RfqSheet({ rfq, vendorName }: { rfq: Rfq; vendorName: string }) 
           ))}
         </tbody>
       </table>
+      {rfq.guide && (
+        <div className="mt-3 border border-black px-3 py-2 text-[11px] leading-relaxed">
+          <div className="mb-1 font-bold">※ 견적 작성 안내</div>
+          {rfq.guide.split('\n').map((x, i) => (
+            <div key={i}>{x}</div>
+          ))}
+        </div>
+      )}
       <div className="mt-3 text-right text-[11px] text-gray-600">업체 포털 "견적 요청" 메뉴에서 바로 입력하실 수 있습니다.</div>
     </div>
   );

@@ -137,7 +137,7 @@ export default async function handler(req: Req, res: Res) {
       if (!office) throw new HttpError(403, '견적 의뢰 메일은 자재부·관리자만 보낼 수 있습니다.');
       const rid = String(body.rfqId ?? '');
       const vid = String(body.vendorId ?? '');
-      const rfq = rid && (await getDoc<{ rfqNo: string; title: string; siteName?: string; deliveryPlace?: string; note?: string; lines: { itemName: string; spec?: string; unit?: string; qty: number }[] }>(me.token, `erp_rfqs/${rid}`));
+      const rfq = rid && (await getDoc<{ rfqNo: string; title: string; siteName?: string; deliveryPlace?: string; note?: string; guide?: string; lines: { itemName: string; spec?: string; unit?: string; qty: number }[] }>(me.token, `erp_rfqs/${rid}`));
       if (!rfq) throw new HttpError(404, '견적 의뢰서를 찾을 수 없습니다.');
       const vendor = vid && (await getDoc<{ name: string; email?: string; contactName?: string }>(me.token, `erp_vendors/${vid}`));
       if (!vendor) throw new HttpError(404, '업체를 찾을 수 없습니다.');
@@ -153,6 +153,8 @@ export default async function handler(req: Req, res: Res) {
         rfq.note ? `■ 안내: ${rfq.note}` : '',
         '',
         `■ 품목 (${rfq.lines.length}건)\n${lineText(rfq.lines as Line[], 15)}`,
+        '',
+        rfq.guide ? `※ 견적 작성 안내\n${rfq.guide}` : '',
         '',
         `업체 포털 "견적 요청" 메뉴에서 품목별 단가를 입력해 제출해 주세요: ${origin}/?vendor`,
         '(업체코드·접속코드로 로그인) 견적서 파일로 회신하셔도 됩니다.',

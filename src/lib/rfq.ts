@@ -27,6 +27,7 @@ export interface Rfq {
   deliveryPlace?: string;
   scope: 'common' | 'site'; // 단가표 적용: 공통 단가 / 이 현장 예외 단가
   note?: string; // 업체에 보이는 안내
+  guide?: string; // 견적 작성 안내 (품명·규격 그대로 쓰기 등) — 의뢰서 PDF·메일·포털에 표시
   lines: RfqLine[];
   vendorIds: string[]; // 보낼 업체 (업체 포털 조회 조건)
   status: 'draft' | 'sent' | 'closed';
@@ -56,6 +57,15 @@ export interface RfqQuote {
   appliedAt?: number; // ERP 단가표에 반영한 시각
   updatedAt: number;
 }
+/** 견적 작성 기본 안내: 업체가 품명·규격을 바꿔 적어 청구서·단가표 품목과 어긋나는 것을 막는다 */
+export const DEFAULT_RFQ_GUIDE = [
+  '1. 품명·규격은 의뢰서에 적힌 그대로 사용해 주십시오. (명신기공 자재관리 기준 표기입니다. 업체 표기·품번으로 바꾸어 적지 마십시오.)',
+  '2. 다른 제조사·대체품으로 견적하실 때는 품명·규격은 그대로 두고 "제조사"·"비고" 칸에 적어 주십시오.',
+  '3. 의뢰서에 없는 품목을 추가하거나 줄을 합치거나 나누지 마십시오. 견적이 어려운 품목은 단가를 비워 두시면 됩니다.',
+  '4. 단가는 VAT 별도, 단위 칸 기준 1단위 단가로 적어 주십시오.',
+  '5. 업체 포털 "견적 요청"에서 입력하시면 품목이 자동으로 맞춰집니다. 파일로 회신하실 때는 받으신 견적의뢰서 양식의 품명·규격 줄을 그대로 두고 단가만 채워 주십시오.',
+].join('\n');
+
 export const quoteId = (rfqId: string, vendorId: string) => `${rfqId}_${vendorId}`;
 
 export function useRfqs() {
