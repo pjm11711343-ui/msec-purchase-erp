@@ -57,16 +57,19 @@ export default function ReqList() {
   const [site, setSite] = useState('');
   const [status, setStatus] = useState<'' | ReqStatus>('');
   const [q, setQ] = useState('');
+  const [proc, setProc] = useState(''); // 공정 이름 필터
 
   const inbox = reqs.data.filter((r) => isMyTurn(r, profile?.id, can('admin')));
   const shown = useMemo(() => {
     let l = tab === 'inbox' ? inbox : tab === 'mine' ? reqs.data.filter((r) => r.createdBy === profile?.id) : reqs.data;
     if (site) l = l.filter((r) => r.siteId === site);
     if (status) l = l.filter((r) => r.status === status);
+    if (proc) l = l.filter((r) => (proc === '-' ? !r.processName : (r.processName ?? '').startsWith(proc)));
     const k = q.trim().toLowerCase();
-    if (k) l = l.filter((r) => [r.docNo, r.siteName, r.createdByName, r.purpose, ...r.lines.map((x) => x.itemName)].join(' ').toLowerCase().includes(k));
+    if (k) l = l.filter((r) => [r.docNo, r.siteName, r.processName, r.createdByName, r.purpose, ...r.lines.map((x) => x.itemName)].join(' ').toLowerCase().includes(k));
     return l;
-  }, [tab, inbox, reqs.data, site, status, q, profile?.id]);
+  }, [tab, inbox, reqs.data, site, status, q, profile?.id, proc]);
+  const procNames = useMemo(() => [...new Set(reqs.data.filter((r) => !site || r.siteId === site).map((r) => r.processName).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'ko')), [reqs.data, site]);
   const trashShown = useMemo(() => {
     let l = reqs.trash;
     if (site) l = l.filter((r) => r.siteId === site);
@@ -92,9 +95,14 @@ export default function ReqList() {
         desc="현장에서 청구서를 작성해 결재에 올리고, 결재가 끝나면 3단계에서 업체별 발주로 넘어갑니다."
         actions={
           !readOnly && (
-            <Link to="/req/new" className="btn-primary">
-              + 청구서 작성
-            </Link>
+            <>
+              <Link to="/process" className="btn-ghost">
+                공정별 청구 현황
+              </Link>
+              <Link to="/req/new" className="btn-primary">
+                + 청구서 작성
+              </Link>
+            </>
           )
         }
       />
@@ -112,6 +120,15 @@ export default function ReqList() {
                   {s.name}
                 </option>
               ))}
+            </select>
+            <select className="input h-7" value={proc} onChange={(e) => setProc(e.target.value)}>
+              <option value="">전체 공정</option>
+              {procNames.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+              <option value="-">(공정 없음)</option>
             </select>
             <select className="input h-7" value={status} onChange={(e) => setStatus(e.target.value as ReqStatus | '')}>
               <option value="">전체 상태</option>
@@ -224,6 +241,7 @@ export default function ReqList() {
                   <th>청구일</th>
                   <th>결의번호</th>
                   <th>현장</th>
+                  <th>공정</th>
                   <th>품목</th>
                   <th className="num">금액</th>
                   <th>상태</th>
@@ -241,6 +259,7 @@ export default function ReqList() {
                       </Link>
                     </td>
                     <td>{r.siteName}</td>
+                    <td className="whitespace-nowrap">{r.processName ? <span className="chip bg-navy-950/5 text-navy-900">{r.processName}</span> : <span className="text-muted">-</span>}</td>
                     <td className="max-w-[320px] truncate text-muted">
                       {r.lines[0]?.itemName}
                       {r.lines.length > 1 && ` 외 ${r.lines.length - 1}건`}

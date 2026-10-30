@@ -73,7 +73,10 @@ export const C = {
   priceCache: 'erp_priceCache',
   reqAlias: 'erp_reqAlias',
   items: 'erp_items',
-  itemCats: 'erp_itemCats', // 품목별 자재분류(표준) 지정
+  itemCats: 'erp_itemCats',
+  processMaster: 'erp_processMaster', // 구역·공종 공통 목록 (main)
+  siteProcess: 'erp_siteProcess', // 현장 공정 설정 (id = siteId)
+  baseSheets: 'erp_baseSheets', // 현장 공정별 기본 청구서(내역 품목표) // 품목별 자재분류(표준) 지정
   priceList: 'erp_priceList',
   vendorAccounts: 'erp_vendorAccounts',
   ledgerMeta: 'erp_ledgerMeta', // 월별 품목: itemAlias(품목 합치기), gipyo(집계표 금액)

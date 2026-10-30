@@ -163,6 +163,19 @@ service cloud.firestore {
       allow create: if isOffice() || (isErp() && request.resource.data.status == 'requested' && request.resource.data.requestedBy == request.auth.uid);
       allow update, delete: if isOffice();
     }
+    // 공정(구역 × 공종): 회사 공통 목록 · 현장 공정 설정 · 공정별 기본 청구서(내역)
+    match /erp_processMaster/{id} {
+      allow read: if isErp();
+      allow write: if isOffice();
+    }
+    match /erp_siteProcess/{siteId} {
+      allow read: if canRead(siteId);
+      allow write: if isOffice();
+    }
+    match /erp_baseSheets/{id} {
+      allow read: if canRead(resource.data.siteId);
+      allow write: if isOffice();
+    }
     match /erp_itemCats/{id} {
       allow read: if isErp();
       allow write: if isOffice();

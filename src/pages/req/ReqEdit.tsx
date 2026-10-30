@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
 import { C } from '../../lib/firebase';
@@ -18,6 +18,7 @@ import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCata
 import { itemKey, makeItemStd, pickListPrice, priceValid, siteCatOfStd, useItemCats, useItemEntries, usePriceList } from '../../lib/itemMaster';
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
+import { cellKey, defaultCells, processLabel, processPriorMap, sortedTrades, sortedZones, useBaseSheets, useProcessMaster, useSiteProcess, type BaseLine } from '../../lib/process';
 import { signMap } from '../../lib/sign';
 import { notifyQuiet } from '../../lib/notify';
 import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
@@ -39,6 +40,7 @@ const HIDDEN_UNITS = new Set(['본']);
 const COMMON_UNITS = ['EA', 'M', 'SET', '개', 'KG', 'BOX', '롤', '식', '대', '조', 'L', 'TON', 'M2', '매', '통'];
 export default function ReqEdit() {
   const { id } = useParams();
+  const [qs] = useSearchParams();
   const nav = useNavigate();
   const { profile, can, readOnly } = useAuth();
   const toast = useToast();
@@ -74,10 +76,12 @@ export default function ReqEdit() {
     if (d) return;
     if (isNew) {
       if (!profile || sites.loading) return;
-      const siteId = sites.data[0]?.id ?? '';
+      const qSite = sites.data.find((s) => s.id === qs.get('site'));
+      const siteId = qSite?.id ?? sites.data[0]?.id ?? '';
       setD({
         siteId,
-        siteName: sites.data[0]?.name ?? '',
+        siteName: (qSite ?? sites.data[0])?.name ?? '',
+        ...(qs.get('zone') && qs.get('trade') ? { zoneId: qs.get('zone')!, tradeId: qs.get('trade')! } : {}),
         docNo: '',
         requestDate: today(),
         status: 'draft',
@@ -115,6 +119,14 @@ export default function ReqEdit() {
   }, [d?.siteId, lines.loading, users.loading]);
 
   const prior = useMemo(() => (d ? priorQtyMap(reqs.data, d.siteId, d.id) : new Map<string, number>()), [reqs.data, d?.siteId, d?.id]);
+  // 공정(구역 × 공종): 청구서 1장 = 공정 1칸. 기반입·잔여는 같은 공정끼리
+  const pm = useProcessMaster();
+  const sproc = useSiteProcess(d?.siteId);
+  const baseSheets = useBaseSheets(d?.siteId);
+  const procCells = sproc.data?.cells ?? defaultCells(pm.master);
+  const baseSheet = d?.zoneId ? baseSheets.data.find((s) => s.zoneId === d.zoneId && s.tradeId === d.tradeId) : undefined;
+  const baseByItem = useMemo(() => new Map((baseSheet?.lines ?? []).map((b) => [itemKey(b.itemName, b.spec), b])), [baseSheet]);
+  const procPrior = useMemo(() => (d?.zoneId && d.tradeId ? processPriorMap(reqs.data, d.siteId, d.zoneId, d.tradeId, d.id) : null), [reqs.data, d?.siteId, d?.zoneId, d?.tradeId, d?.id]);
   const siteCats = cats.data.filter((c) => c.siteId === d?.siteId).sort((a, b) => a.order - b.order);
   // 품명·규격 목록: 월별 품목명세(계산서) + 단가표 + 지난 청구서. 같은 품목(표기 차이)은 한 줄, 계산서 표기를 먼저 씀
   const catalog = useItemCatalog();
@@ -159,10 +171,11 @@ export default function ReqEdit() {
     // 직접 등록 품목 (승인됨 + 요청 중: 요청 중인 품목도 바로 쓸 수 있음)
     itemEntries.data.forEach((e) => (e.status === 'active' || e.status === 'requested') && put(e.itemName, e.spec, e.unit));
     priceList.data.forEach((p) => put(p.itemName, p.spec, p.unit));
+    baseSheets.data.forEach((b) => b.lines.forEach((l) => put(l.itemName, l.spec, l.unit)));
     prices.rows.forEach((p) => !hidden.has(itemKey(p.itemName, p.spec)) && put(p.itemName, p.spec, p.unit));
     reqs.data.forEach((r) => r.lines.forEach((l) => !hidden.has(itemKey(l.itemName, l.spec)) && put(l.itemName, l.spec, l.unit)));
     return { items, specs, units, unitsItem, cat, requested };
-  }, [catalog.items, prices.rows, reqs.data, itemEntries.data, priceList.data]);
+  }, [catalog.items, prices.rows, reqs.data, itemEntries.data, priceList.data, baseSheets.data]);
   const itemOptions = useMemo(() => [...lists.items.values()].sort((a, b) => a.localeCompare(b, 'ko')), [lists]);
   const itemSet = useMemo(() => new Set(lists.items.keys()), [lists]);
   const sizeOf = (s: string) => {
@@ -196,7 +209,39 @@ export default function ReqEdit() {
   const dupDoc =
     d.docNo.trim() && reqs.data.some((r) => r.id !== d.id && r.siteId === d.siteId && nameKey(r.docNo) === nameKey(d.docNo));
 
-  const priorOf = (l: ReqLine) => l.priorQtyManual ?? prior.get(priceKey(l.itemName, l.spec)) ?? 0;
+  const priorOf = (l: ReqLine) => {
+    if (l.priorQtyManual != null) return l.priorQtyManual;
+    if (procPrior) {
+      const k = itemKey(l.itemName, l.spec);
+      return (procPrior.get(k) ?? 0) + (baseByItem.get(k)?.priorStart ?? 0);
+    }
+    return prior.get(priceKey(l.itemName, l.spec)) ?? 0;
+  };
+  /** 기본 청구서(내역) 품목 → 청구서 줄 값 */
+  const fromBase = (b: BaseLine): Partial<ReqLine> => ({
+    itemName: b.itemName,
+    spec: b.spec,
+    unit: b.unit,
+    contractQty: b.lump ? 1 : b.contractQty,
+    contractPrice: b.lump ? b.contractAmount : b.contractPrice,
+    execQty: b.lump ? 0 : b.execQty,
+    inBase: true,
+    ...(b.siteCategoryId ? { siteCategoryId: b.siteCategoryId, catAuto: undefined } : {}),
+  });
+  /** 기본 청구서 불러오기: 아직 없는 내역 품목을 줄로 깐다 (금회청구는 비움) */
+  const loadBase = () => {
+    if (!baseSheet?.lines.length) return toast('이 공정의 기본 청구서(내역)가 없습니다. 공정별 청구 화면에서 자재부가 내역을 넣어야 합니다.', 'err');
+    const have = new Set(d.lines.filter((l) => l.itemName.trim()).map((l) => itemKey(l.itemName, l.spec)));
+    const add = baseSheet.lines.filter((b) => !b.off && !have.has(itemKey(b.itemName, b.spec))).map((b) => ({ ...newLine(), ...fromBase(b) }) as ReqLine);
+    if (!add.length) return toast('기본 청구서 품목이 이미 모두 들어가 있습니다.');
+    setD({ ...d, lines: [...d.lines.filter((l) => l.itemName.trim()), ...add.map((l) => ({ ...l, ...(!l.orderPrice ? suggest(l) : {}), ...autoCat(l) }))] });
+    toast(`기본 청구서 품목 ${add.length}줄을 불러왔습니다. 금회청구 수량을 넣으세요. (수량이 빈 내역 줄은 결재 올릴 때 빠집니다)`);
+  };
+  const setProcess = (p: { zoneId?: string; tradeId?: string; zoneSub?: string }) => {
+    const n = { ...d, ...p };
+    if (p.zoneId !== undefined && !pm.master.zones.find((z) => z.id === p.zoneId)?.subs?.length) n.zoneSub = undefined;
+    setD(n);
+  };
 
   const setLine = (key: string, patch: Partial<ReqLine>) => setD((x) => x && { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
@@ -230,10 +275,20 @@ export default function ReqEdit() {
     if (id) return { siteCategoryId: id, catAuto: true };
     return l.catAuto ? { siteCategoryId: undefined, catAuto: undefined } : {};
   };
+  /** 공정이 있으면 내역(기본 청구서) 값을 채우고, 없는 품목은 내역 외로 */
+  const baseFill = (l: ReqLine): Partial<ReqLine> => {
+    if (!d.zoneId || !l.itemName) return {};
+    const b = baseByItem.get(itemKey(l.itemName, l.spec));
+    if (b) {
+      const f = fromBase(b);
+      return { contractQty: f.contractQty, contractPrice: f.contractPrice, execQty: f.execQty, inBase: true, ...(!l.siteCategoryId || l.catAuto ? { siteCategoryId: f.siteCategoryId ?? l.siteCategoryId, catAuto: f.siteCategoryId ? undefined : l.catAuto } : {}) };
+    }
+    return l.inBase ? { inBase: false, contractQty: 0, contractPrice: 0, execQty: 0 } : { inBase: false };
+  };
   const autoPrice = (key: string) =>
     setD((x) => {
       if (!x) return x;
-      return { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...(!l.orderPrice ? suggest(l) : {}), ...autoCat(l) } : l)) };
+      return { ...x, lines: x.lines.map((l) => (l.key === key ? (((y) => ({ ...y, ...baseFill(y) }))({ ...l, ...(!l.orderPrice ? suggest(l) : {}), ...autoCat(l) })) : l)) };
     });
 
   /** 새 품목: 자재부·관리자는 바로 등록, 현장은 등록 요청 (요청 중에도 사용 가능) */
@@ -295,8 +350,10 @@ export default function ReqEdit() {
   const preOrdered = d.id ? d.lines.map((l) => ordered.get(`${d.id}|${l.key}`)).filter((p): p is NonNullable<typeof p> => !!p) : [];
 
   const build = (patch: Partial<Requisition>): Omit<Requisition, 'id'> => {
+    const dropEmpty = patch.status === 'pending' && !!d.zoneId;
     const ls = d.lines
       .filter((l) => l.itemName.trim())
+      .filter((l) => !(dropEmpty && l.inBase && !l.reqQty && !l.orderQty))
       .map((l) => ({ ...l, itemName: l.itemName.trim(), spec: l.spec.trim(), priorQty: priorOf(l), orderQty: l.orderQty || l.reqQty }));
     const site = sites.data.find((s) => s.id === d.siteId);
     const { id: _ignore, ...rest } = d;
@@ -304,6 +361,7 @@ export default function ReqEdit() {
     return stripUndefined({
       ...rest,
       siteName: site?.name ?? d.siteName,
+      processName: d.zoneId ? processLabel(pm.master, d) : undefined,
       lines: ls,
       totalAmount: ls.reduce((a, l) => a + lineAmount(l), 0),
       updatedAt: Date.now(),
@@ -501,6 +559,13 @@ export default function ReqEdit() {
       }
       if (!l.orderPrice) Object.assign(l, suggest(l));
       Object.assign(l, autoCat(l));
+      if (d.zoneId) {
+        const keepQty = { contractQty: l.contractQty, execQty: l.execQty };
+        Object.assign(l, baseFill(l));
+        // 엑셀에 계약·실행 수량이 적혀 있으면 그 값을 우선
+        if (keepQty.contractQty) l.contractQty = keepQty.contractQty;
+        if (keepQty.execQty) l.execQty = keepQty.execQty;
+      }
       return l;
     });
     setD((x) => x && { ...x, lines: [...x.lines.filter((l) => l.itemName.trim()), ...added] });
@@ -749,6 +814,66 @@ export default function ReqEdit() {
             </div>
           </Field>
           <div className="col-span-2 md:col-span-4">
+            <Field label="공정 (구역 · 공종)" hint={!d.zoneId ? '공정을 고르면 기본 청구서(내역)를 불러오고, 계약·실행·기반입·잔여를 이 공정 기준으로 계산합니다.' : undefined}>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="input w-36"
+                  value={d.zoneId ?? ''}
+                  disabled={!draftEditable}
+                  onChange={(e) => setProcess({ zoneId: e.target.value || undefined, ...(e.target.value ? {} : { tradeId: undefined }) })}
+                >
+                  <option value="">(공정 없음)</option>
+                  {sortedZones(pm.master)
+                    .filter((z) => z.id === d.zoneId || pm.master.trades.some((t) => procCells.includes(cellKey(z.id, t.id))))
+                    .map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.name}
+                      </option>
+                    ))}
+                </select>
+                {d.zoneId && (
+                  <select className="input w-24" value={d.tradeId ?? ''} disabled={!draftEditable} onChange={(e) => setProcess({ tradeId: e.target.value || undefined })}>
+                    <option value="">공종 ▾</option>
+                    {sortedTrades(pm.master)
+                      .filter((t) => t.id === d.tradeId || procCells.includes(cellKey(d.zoneId!, t.id)))
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                  </select>
+                )}
+                {(pm.master.zones.find((z) => z.id === d.zoneId)?.subs?.length ?? 0) > 0 && (
+                  <select className="input w-24" value={d.zoneSub ?? ''} disabled={!editable} onChange={(e) => setProcess({ zoneSub: e.target.value || undefined })}>
+                    <option value="">위치 ▾</option>
+                    {pm.master.zones
+                      .find((z) => z.id === d.zoneId)!
+                      .subs!.map((x) => (
+                        <option key={x} value={x}>
+                          {x}
+                        </option>
+                      ))}
+                  </select>
+                )}
+                {d.zoneId && d.tradeId && (
+                  <>
+                    <span className="text-[12px] text-muted">
+                      기본 청구서 {baseSheet ? `${baseSheet.lines.filter((b) => !b.off).length}품목` : '없음'}
+                    </span>
+                    {editable && (
+                      <button className="btn-dark h-8 text-[12px]" onClick={loadBase}>
+                        기본 청구서 불러오기
+                      </button>
+                    )}
+                    <Link className="text-[12px] text-sky-700 hover:underline" to={`/process?site=${d.siteId}&tab=sheet&cell=${encodeURIComponent(cellKey(d.zoneId, d.tradeId))}`}>
+                      공정 내역 보기
+                    </Link>
+                  </>
+                )}
+              </div>
+            </Field>
+          </div>
+          <div className="col-span-2 md:col-span-4">
             <Field label="사용 목적">
               <input className="input" value={d.purpose ?? ''} disabled={!editable} onChange={(e) => setD({ ...d, purpose: e.target.value })} />
             </Field>
@@ -836,7 +961,9 @@ export default function ReqEdit() {
         <div className="relative border-b border-line px-4 pb-2 pt-3">
           <div className="text-center text-[20px] font-bold tracking-[0.6em] text-navy-950 underline decoration-1 underline-offset-[6px]">구매청구서</div>
           <div className="mt-2 flex flex-wrap items-end justify-between gap-2 text-[12.5px]">
-            <span className="font-semibold">현장명 : {d.siteName || '-'} 현장</span>
+            <span className="font-semibold">
+              현장명 : {d.siteName || '-'} 현장{d.zoneId && <span className="ml-3 rounded bg-navy-950 px-2 py-0.5 text-[12px] text-white">{processLabel(pm.master, d)}</span>}
+            </span>
             <span className="text-muted">
               결의번호 : 제 <b className="text-ink">{d.requestDate}</b> - <b className="text-ink">{d.docNo || '　'}</b> 호
             </span>
@@ -950,6 +1077,9 @@ export default function ReqEdit() {
                           <span className="break-words">{l.itemName}</span>
                         )}
                         {l.itemName && lists.requested.has(itemKey(l.itemName, l.spec)) && <div className="text-[10.5px] text-amber-700" title="자재부 승인 전 품목 (사용은 가능)">품목 등록 요청 중</div>}
+                        {d.zoneId && l.itemName && !baseByItem.has(itemKey(l.itemName, l.spec)) && (
+                          <div className="text-[10.5px] text-violet-700" title="이 공정 기본 청구서(내역)에 없는 품목 — 추가·대체 자재">내역 외</div>
+                        )}
                         {l.srcItem && (invalidLine(l) ? (
                           <div className="mt-0.5 text-[10.5px] leading-tight">
                             <div className="font-semibold text-red-600">내역·규격 수정 요함</div>

@@ -58,7 +58,9 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
   // 7행 제목 줄: 이 청구서 줄들의 사용 위치·공정
   const locs = [...new Set(lines.map((l) => (l.location ?? '').trim()).filter(Boolean))];
-  set('B7', locs.length ? (locs.length > 3 ? `${locs.slice(0, 3).join(' · ')} 외` : locs.join(' · ')) : null);
+  const locText = locs.length ? (locs.length > 3 ? `${locs.slice(0, 3).join(' · ')} 외` : locs.join(' · ')) : '';
+  // 공정별 청구서는 공정 이름을 제목으로 (예: "세대외배관(복도) 위생")
+  set('B7', [req.processName, locText].filter(Boolean).join(' - ') || null);
   lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
     const r = ITEM_ROWS[i];
     set(`B${r}`, l.itemName);

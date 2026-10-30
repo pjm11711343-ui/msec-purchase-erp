@@ -33,6 +33,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
   {
     title: '구매 흐름',
     items: [
+      { to: '/process', label: '공정별 청구', roles: ALL },
       { to: '/req', label: '구매청구', roles: ALL },
       { to: '/po', label: '발주', roles: ALL },
       { to: '/receipt', label: '입고 현황', roles: ALL },
@@ -49,6 +50,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { to: '/master/sites', label: '현장', roles: OFFICE },
       { to: '/master/vendors', label: '업체', roles: OFFICE },
       { to: '/master/categories', label: '분류', roles: OFFICE },
+      { to: '/master/processes', label: '구역·공종', roles: OFFICE },
       { to: '/master/items-prices', label: '품목·단가', roles: OFFICE },
       { to: '/master/prices', label: '단가관리 단가 조회', roles: OFFICE },
       { to: '/master/req-alias', label: '품명 다른 표기', roles: OFFICE },

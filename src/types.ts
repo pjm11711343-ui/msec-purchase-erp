@@ -192,6 +192,7 @@ export interface ReqLine {
   dueDate?: string; // 희망 납기일
   location?: string; // 사용 위치/공정
   siteCategoryId?: string; // 자재분류(현장분류)
+  inBase?: boolean; // 기본 청구서(내역)에 있는 품목인지 (false = 내역 외)
   catAuto?: boolean; // 품목의 자재분류로 자동으로 들어간 값 (품목을 바꾸면 다시 찾음)
 }
 
@@ -211,6 +212,10 @@ export interface Requisition {
   docNo: string; // 결의번호 (직접 입력)
   requestDate: string; // YYYY-MM-DD
   purpose?: string; // 사용 목적
+  zoneId?: string; // 공정: 구역 (청구서 1장 = 공정 1칸)
+  tradeId?: string; // 공정: 공종
+  zoneSub?: string; // 구역 안 세부 위치 (예: 세대외배관 → 복도)
+  processName?: string; // 공정 이름 (저장 시점, 예: "세대외배관(복도) 위생")
   status: ReqStatus;
   approvalType: '2단계' | '6칸';
   steps: ApprovalStepState[];
