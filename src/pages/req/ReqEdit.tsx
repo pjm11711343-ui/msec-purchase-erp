@@ -1204,6 +1204,7 @@ export default function ReqEdit() {
                         <th>최신 계산서 단가</th>
                         <th>월</th>
                         <th>업체</th>
+                        <th>제조사</th>
                         <th className="num">단가</th>
                         <th></th>
                       </tr>
@@ -1219,6 +1220,7 @@ export default function ReqEdit() {
                               {lp.d ? ` (${lp.d})` : ''}
                             </td>
                             <td>{lp.v}</td>
+                            <td className="text-muted">{lp.mk}</td>
                             <td className="num font-semibold">{won(lp.p)}</td>
                             <td className="text-right">
                               <button className="btn-dark h-7 text-[12px]" onClick={() => choose({ orderPrice: lp.p, priceSource: '계산서', ...(v ? { vendorId: v.id, vendorName: v.name } : {}) })}>
@@ -1236,6 +1238,7 @@ export default function ReqEdit() {
                     <thead>
                       <tr>
                         <th>ERP 단가표 업체</th>
+                        <th>제조사</th>
                         <th>현장</th>
                         <th className="num">협가</th>
                         <th className="num">네고율</th>
@@ -1247,6 +1250,7 @@ export default function ReqEdit() {
                       {erpRows.map((p) => (
                         <tr key={p.id} className={priceValid(p) ? '' : 'text-muted'}>
                           <td>{p.vendorName}</td>
+                          <td className="text-muted">{p.maker}</td>
                           <td>{p.siteName ? <span className="chip bg-amber-soft text-amber-800">이 현장</span> : <span className="text-[12px] text-muted">공통</span>}</td>
                           <td className="num">{p.listPrice ? won(p.listPrice) : ''}</td>
                           <td className="num">{p.negoRate ? `${p.negoRate}%` : ''}</td>

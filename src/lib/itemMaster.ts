@@ -15,6 +15,7 @@ export interface ItemEntry {
   spec: string;
   unit: string;
   stdCatId?: string; // 표준 자재분류
+  maker?: string; // 제조사(메이커)
   status: 'active' | 'requested' | 'rejected' | 'hidden'; // hidden = 계산서 품목을 청구서 목록에서 숨김
   note?: string;
   requestedBy?: string;
@@ -33,6 +34,7 @@ export interface PriceEntry {
   unit: string;
   vendorId: string;
   vendorName: string;
+  maker?: string; // 제조사(메이커)
   siteId?: string; // 있으면 그 현장만의 예외 단가
   siteName?: string;
   listPrice: number; // 협가
