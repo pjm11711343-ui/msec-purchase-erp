@@ -15,6 +15,8 @@ export interface RfqLine {
   unit: string;
   qty: number;
   note?: string;
+  srcItem?: string; // 붙여넣기·입력한 원래 표기 (기준 품명으로 바꾼 경우)
+  srcSpec?: string;
 }
 export interface Rfq {
   id: string;

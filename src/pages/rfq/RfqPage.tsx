@@ -1,14 +1,16 @@
 // 구매 흐름 › 견적 의뢰 (자재부·관리자)
 //  목록 → 의뢰서 작성(품목·현장·업체) → 업체에 보내기(메일+포털) → 견적 받기(포털 제출 / 엑셀·직접 입력) → 비교 → ERP 단가표 반영
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { useSites, useVendors } from '../../lib/hooks';
-import { useItemCatalog } from '../../lib/itemCatalog';
-import { itemKey, usePriceList, useItemEntries } from '../../lib/itemMaster';
+import { itemKey, usePriceList } from '../../lib/itemMaster';
+import { useStdItems } from '../../lib/stdItems';
+import { aliasKey, saveReqAliases } from '../../lib/reqAlias';
+import PickInput from '../../components/PickInput';
 import { nameKey, num, won } from '../../lib/normalize';
 import { notify } from '../../lib/notify';
 import { readWorkbook } from '../../lib/parsers';
@@ -112,8 +114,7 @@ function RfqDetail({ id }: { id: string }) {
   const rfqs = useRfqs();
   const vendors = useVendors();
   const sites = useSites();
-  const catalog = useItemCatalog();
-  const entries = useItemEntries();
+  const std = useStdItems(); // 프로그램 기준 품명·규격 (청구서와 같은 목록)
   const priceList = usePriceList();
   const isNew = id === 'new';
   const stored = rfqs.data.find((r) => r.id === id);
@@ -124,6 +125,7 @@ function RfqDetail({ id }: { id: string }) {
   const [paste, setPaste] = useState<string | null>(null);
   const [entry, setEntry] = useState<{ vendor: Vendor; lines: Record<string, QuoteLine>; fileName?: string } | null>(null);
   const [pdfVendor, setPdfVendor] = useState<string | null>(null);
+  const [newItem, setNewItem] = useState<{ key: string; itemName: string; spec: string; unit: string } | null>(null);
   const pdfRef = useRef<HTMLDivElement>(null);
   const who = profile?.name ?? '';
 
@@ -138,18 +140,34 @@ function RfqDetail({ id }: { id: string }) {
     if (stored && d && d.id && stored.updatedAt > d.updatedAt && d.status !== 'draft') setD(structuredClone(stored));
   }, [stored, d]);
 
-  const itemNames = useMemo(() => [...new Set([...catalog.items.map((c) => c.i), ...entries.data.filter((e) => e.status === 'active').map((e) => e.itemName)])], [catalog.items, entries.data]);
+  const badCount = d ? d.lines.filter((l) => l.itemName.trim() && !std.isStd(l.itemName, l.spec)).length : 0;
   if (!d) return <div className="text-muted">{rfqs.loading ? '불러오는 중…' : '견적 의뢰서를 찾을 수 없습니다.'}</div>;
 
   const editable = d.status === 'draft';
   const setLine = (k: string, p: Partial<RfqLine>) => setD({ ...d, lines: d.lines.map((l) => (l.key === k ? { ...l, ...p } : l)) });
   const vName = (vid: string) => vendors.data.find((v) => v.id === vid)?.name ?? vid;
-  const specsOf = (item: string) => [...new Set([...catalog.items.filter((c) => nameKey(c.i) === nameKey(item)).map((c) => c.s), ...entries.data.filter((e) => nameKey(e.itemName) === nameKey(item)).map((e) => e.spec)])];
-  const unitOf = (item: string, spec: string) => catalog.items.find((c) => itemKey(c.i, c.s) === itemKey(item, spec))?.u ?? entries.data.find((e) => itemKey(e.itemName, e.spec) === itemKey(item, spec))?.unit ?? '';
+  const unitOf = std.unitOf;
+  /** 원래 표기를 기준 품명으로 고친 줄 → 회사 공용 "다른 표기"로 기억 (다음 붙여넣기·청구서 엑셀에서 자동 인식) */
+  const learn = async (lines: RfqLine[]) => {
+    const seen = new Set<string>();
+    const items = lines
+      .filter((l) => l.srcItem && std.isStd(l.itemName, l.spec) && aliasKey(l.srcItem, l.srcSpec ?? '') !== aliasKey(l.itemName, l.spec))
+      .filter((l) => {
+        const k = aliasKey(l.srcItem!, l.srcSpec ?? '');
+        if (seen.has(k)) return false;
+        seen.add(k);
+        const ex = std.aliasMap.get(k);
+        return !ex || ex.toItem !== l.itemName || ex.toSpec !== l.spec;
+      })
+      .map((l) => ({ fromItem: l.srcItem!, fromSpec: l.srcSpec ?? '', toItem: l.itemName, toSpec: l.spec, byName: who }));
+    if (items.length) await saveReqAliases(items).catch(() => undefined);
+  };
 
   const save = async (patch: Partial<Rfq> = {}, msg = '저장했습니다.') => {
     const lines = d.lines.filter((l) => l.itemName.trim()).map((l) => ({ ...l, itemName: l.itemName.trim(), spec: l.spec.trim(), unit: l.unit.trim() }));
     if (!lines.length) return toast('품목을 한 줄 이상 넣으세요.', 'err'), null;
+    if (patch.status === 'sent' && badCount) return toast(`기준 품명·규격이 아닌 줄이 ${badCount}개 있습니다 (빨간 칸). 목록에서 고르거나 새 품목으로 등록한 뒤 보내세요.`, 'err'), null;
+    void learn(lines);
     const rid = d.id ?? newId(C.rfqs);
     const site = sites.data.find((s) => s.id === d.siteId);
     const { id: _x, ...rest } = d;
@@ -250,7 +268,11 @@ function RfqDetail({ id }: { id: string }) {
           const item = String(r[ci] ?? '').trim();
           if (!item) continue;
           const spec = cs >= 0 ? String(r[cs] ?? '').trim() : '';
-          const l = d.lines.find((x) => itemKey(x.itemName, x.spec) === itemKey(item, spec)) ?? d.lines.find((x) => nameKey(x.itemName) === nameKey(item) && !x.spec);
+          const rec = std.recognize(item, spec);
+          const l =
+            d.lines.find((x) => itemKey(x.itemName, x.spec) === itemKey(rec.itemName, rec.spec)) ??
+            d.lines.find((x) => x.srcItem && itemKey(x.srcItem, x.srcSpec ?? '') === itemKey(item, spec)) ??
+            d.lines.find((x) => nameKey(x.itemName) === nameKey(rec.itemName) && !x.spec);
           const price = num(r[cp]);
           if (!l || !(price > 0)) continue;
           next[l.key] = { key: l.key, price, maker: cm >= 0 ? String(r[cm] ?? '').trim() || undefined : next[l.key]?.maker, note: cn >= 0 ? String(r[cn] ?? '').trim() || undefined : next[l.key]?.note };
@@ -289,9 +311,16 @@ function RfqDetail({ id }: { id: string }) {
       .split(/\r?\n/)
       .map((x) => x.split('\t'))
       .filter((c) => c[0]?.trim())
-      .map((c) => ({ key: lineKey(), itemName: c[0].trim(), spec: (c[1] ?? '').trim(), unit: (c[2] ?? '').trim() || unitOf(c[0], c[1] ?? ''), qty: num(c[3]) }));
+      .map((c) => {
+        const r = std.recognize(c[0], c[1] ?? '');
+        const src = r.status === 'std' ? {} : { srcItem: c[0].trim(), srcSpec: (c[1] ?? '').trim() };
+        return { key: lineKey(), itemName: r.itemName, spec: r.spec, unit: unitOf(r.itemName, r.spec) || (c[2] ?? '').trim(), qty: num(c[3]), ...src };
+      });
     setD({ ...d, lines: [...d.lines.filter((l) => l.itemName.trim()), ...rows] });
     setPaste(null);
+    const alias = rows.filter((r) => r.srcItem && std.isStd(r.itemName, r.spec)).length;
+    const bad = rows.filter((r) => !std.isStd(r.itemName, r.spec)).length;
+    toast(`${rows.length}줄 추가.${alias ? ` 다른 표기 ${alias}줄은 기준 품명·규격으로 바꿨습니다.` : ''}${bad ? ` ${bad}줄은 기준 품명을 찾지 못했습니다 — 빨간 칸을 고쳐 주세요.` : ''}`, bad ? 'err' : undefined);
   };
 
   const vendorList = vendors.data.filter((v) => v.active !== false).filter((v) => !vq || nameKey(v.name).includes(nameKey(vq)) || d.vendorIds.includes(v.id));
@@ -300,7 +329,7 @@ function RfqDetail({ id }: { id: string }) {
     <div>
       <PageHeader
         title={`견적 의뢰서 ${d.rfqNo}`}
-        desc={editable ? '품목과 업체를 정하고 "업체에 보내기"를 누르세요. 업체에는 품명·규격·단위·수량과 현장·납품 장소, 안내만 보입니다.' : undefined}
+        desc={editable ? '품명·규격은 프로그램 기준(구매청구서와 같은 목록)으로만 넣습니다. 그래야 업체 견적 단가가 청구서 품목에 그대로 연결됩니다. 업체에는 품명·규격·단위·수량과 현장·납품 장소, 안내만 보입니다.' : undefined}
         actions={
           <>
             <Link to="/rfq" className="btn-ghost">
@@ -436,11 +465,11 @@ function RfqDetail({ id }: { id: string }) {
             </div>
           )}
         </div>
-        <datalist id="rfq-items">
-          {itemNames.slice(0, 4000).map((x) => (
-            <option key={x} value={x} />
-          ))}
-        </datalist>
+        {editable && badCount > 0 && (
+          <div className="border-b border-line bg-red-50 px-4 py-2 text-[12.5px] text-red-700">
+            기준 품명·규격이 아닌 줄 {badCount}개 (빨간 칸). 업체 견적이 프로그램 품명·규격으로 들어오도록 목록에서 고르거나 추천을 누르세요. 목록에 없는 품목은 "새 품목"으로 등록합니다. 고친 표기는 회사 공용으로 기억해 다음부터 자동으로 바꿉니다.
+          </div>
+        )}
         <div className="overflow-auto">
           <table className="tbl text-[12.5px]">
             <thead>
@@ -469,17 +498,50 @@ function RfqDetail({ id }: { id: string }) {
                 return (
                   <tr key={l.key}>
                     <td className="text-muted">{i + 1}</td>
-                    <td>{editable ? <input className="input h-7 w-full px-1.5" list="rfq-items" value={l.itemName} onChange={(e) => setLine(l.key, { itemName: e.target.value })} /> : <span className="font-medium">{l.itemName}</span>}</td>
                     <td>
                       {editable ? (
-                        <>
-                          <input className="input h-7 w-full px-1.5" list={`rfq-spec-${l.key}`} value={l.spec} onChange={(e) => setLine(l.key, { spec: e.target.value, unit: l.unit || unitOf(l.itemName, e.target.value) })} />
-                          <datalist id={`rfq-spec-${l.key}`}>
-                            {specsOf(l.itemName).map((s) => (
-                              <option key={s} value={s} />
-                            ))}
-                          </datalist>
-                        </>
+                        <PickInput
+                          value={l.itemName}
+                          options={std.itemOptions}
+                          invalid={!!l.itemName && !std.itemOptions.some((x) => nameKey(x) === nameKey(l.itemName))}
+                          placeholder="품명 선택 ▾"
+                          onPick={(v) => setLine(l.key, { itemName: v, ...(std.specOptions(v).some((x) => itemKey(v, x) === itemKey(v, l.spec)) ? {} : { spec: '' }), unit: unitOf(v, '') || l.unit })}
+                        />
+                      ) : (
+                        <span className="font-medium">{l.itemName}</span>
+                      )}
+                      {editable && l.srcItem && (
+                        <div className="mt-0.5 text-[10.5px] text-muted">
+                          원래 표기: {l.srcItem} {l.srcSpec}
+                        </div>
+                      )}
+                      {editable && l.itemName && !std.isStd(l.itemName, l.spec) && (
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10.5px]">
+                          <span className="font-semibold text-red-600">품명·규격 수정 요함</span>
+                          {std.suggest(l.srcItem ?? l.itemName, l.srcSpec ?? l.spec).map((c) => (
+                            <button
+                              key={`${c.i}|${c.s}`}
+                              className="rounded border border-sky-200 bg-sky-50 px-1 text-sky-800 hover:bg-sky-100"
+                              onClick={() => setLine(l.key, { itemName: c.i, spec: c.s, unit: unitOf(c.i, c.s) || l.unit, srcItem: l.srcItem ?? l.itemName, srcSpec: l.srcSpec ?? l.spec })}
+                            >
+                              {c.i} {c.s}
+                            </button>
+                          ))}
+                          <button className="text-sky-700 underline" onClick={() => setNewItem({ key: l.key, itemName: l.srcItem ?? l.itemName, spec: l.srcSpec ?? l.spec, unit: l.unit })}>
+                            새 품목
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {editable ? (
+                        <PickInput
+                          value={l.spec}
+                          options={std.specOptions(l.itemName)}
+                          invalid={!!l.spec && !std.isStd(l.itemName, l.spec)}
+                          placeholder={l.itemName ? '규격 ▾' : '품명 먼저'}
+                          onPick={(v) => setLine(l.key, { spec: v, unit: unitOf(l.itemName, v) || l.unit })}
+                        />
                       ) : (
                         l.spec
                       )}
@@ -593,6 +655,54 @@ function RfqDetail({ id }: { id: string }) {
               </tbody>
             </table>
           </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!newItem}
+        title="새 품목 등록 (프로그램 기준 품명·규격)"
+        onClose={() => setNewItem(null)}
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setNewItem(null)}>
+              취소
+            </button>
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                if (!newItem?.itemName.trim()) return toast('품명을 입력하세요.', 'err');
+                try {
+                  const now = Date.now();
+                  await commitBatch([{ type: 'set', col: C.items, id: newId(C.items), data: { itemName: newItem.itemName.trim(), spec: newItem.spec.trim(), unit: newItem.unit.trim(), status: 'active', createdAt: now, requestedByName: who, note: `견적 의뢰 ${d.rfqNo}에서 등록` } }]);
+                  const old = d.lines.find((x) => x.key === newItem.key);
+                  setLine(newItem.key, { itemName: newItem.itemName.trim(), spec: newItem.spec.trim(), unit: newItem.unit.trim(), ...(old && (old.srcItem || aliasKey(old.itemName, old.spec) !== aliasKey(newItem.itemName, newItem.spec)) ? { srcItem: old.srcItem ?? old.itemName, srcSpec: old.srcSpec ?? old.spec } : {}) });
+                  setNewItem(null);
+                  toast('품목·단가의 품목 목록에 등록했습니다. 청구서에서도 같은 품명으로 씁니다.');
+                } catch (e) {
+                  toast(errMsg(e), 'err');
+                }
+              }}
+            >
+              등록
+            </button>
+          </>
+        }
+      >
+        {newItem && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2 text-[12.5px] text-muted">회사에서 쓸 표기로 고쳐 등록하세요. 등록하면 품목·단가 목록과 구매청구서 품명 목록에 바로 나옵니다.</div>
+            <div className="col-span-2">
+              <Field label="품명 *">
+                <input className="input" value={newItem.itemName} onChange={(e) => setNewItem({ ...newItem, itemName: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="규격">
+              <input className="input" value={newItem.spec} onChange={(e) => setNewItem({ ...newItem, spec: e.target.value })} />
+            </Field>
+            <Field label="단위">
+              <input className="input" value={newItem.unit} onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })} />
+            </Field>
+          </div>
         )}
       </Modal>
 
