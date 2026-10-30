@@ -122,7 +122,6 @@ function RfqDetail({ id }: { id: string }) {
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [vq, setVq] = useState('');
-  const [paste, setPaste] = useState<string | null>(null);
   const [entry, setEntry] = useState<{ vendor: Vendor; lines: Record<string, QuoteLine>; fileName?: string } | null>(null);
   const [pdfVendor, setPdfVendor] = useState<string | null>(null);
   const [newItem, setNewItem] = useState<{ key: string; itemName: string; spec: string; unit: string } | null>(null);
@@ -305,23 +304,6 @@ function RfqDetail({ id }: { id: string }) {
     XLSX.utils.book_append_sheet(wb, ws, forVendor ? '견적서' : '견적비교');
     XLSX.writeFile(wb, forVendor ? `견적의뢰서_${d.rfqNo}_${vName(forVendor)}.xlsx` : `견적비교_${d.rfqNo}.xlsx`);
   };
-  const pasteLines = () => {
-    if (!paste) return;
-    const rows = paste
-      .split(/\r?\n/)
-      .map((x) => x.split('\t'))
-      .filter((c) => c[0]?.trim())
-      .map((c) => {
-        const r = std.recognize(c[0], c[1] ?? '');
-        const src = r.status === 'std' ? {} : { srcItem: c[0].trim(), srcSpec: (c[1] ?? '').trim() };
-        return { key: lineKey(), itemName: r.itemName, spec: r.spec, unit: unitOf(r.itemName, r.spec) || (c[2] ?? '').trim(), qty: num(c[3]), ...src };
-      });
-    setD({ ...d, lines: [...d.lines.filter((l) => l.itemName.trim()), ...rows] });
-    setPaste(null);
-    const alias = rows.filter((r) => r.srcItem && std.isStd(r.itemName, r.spec)).length;
-    const bad = rows.filter((r) => !std.isStd(r.itemName, r.spec)).length;
-    toast(`${rows.length}줄 추가.${alias ? ` 다른 표기 ${alias}줄은 기준 품명·규격으로 바꿨습니다.` : ''}${bad ? ` ${bad}줄은 기준 품명을 찾지 못했습니다 — 빨간 칸을 고쳐 주세요.` : ''}`, bad ? 'err' : undefined);
-  };
 
   const vendorList = vendors.data.filter((v) => v.active !== false).filter((v) => !vq || nameKey(v.name).includes(nameKey(vq)) || d.vendorIds.includes(v.id));
 
@@ -456,8 +438,8 @@ function RfqDetail({ id }: { id: string }) {
           {!editable && submitted.length > 0 && <span className="text-[12px] text-muted">업체별 견적 비교 · 최저가는 굵게</span>}
           {editable && (
             <div className="ml-auto flex gap-2">
-              <button className="btn-ghost h-7 text-[12px]" onClick={() => setPaste('')}>
-                엑셀 붙여넣기
+              <button className="btn-ghost h-7 text-[12px]" onClick={() => setNewItem({ key: '', itemName: '', spec: '', unit: '' })}>
+                + 새 품목 등록
               </button>
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, { key: lineKey(), itemName: '', spec: '', unit: '', qty: 0 }] })}>
                 + 줄 추가
@@ -465,12 +447,22 @@ function RfqDetail({ id }: { id: string }) {
             </div>
           )}
         </div>
-        {editable && badCount > 0 && (
-          <div className="border-b border-line bg-red-50 px-4 py-2 text-[12.5px] text-red-700">
-            기준 품명·규격이 아닌 줄 {badCount}개 (빨간 칸). 업체 견적이 프로그램 품명·규격으로 들어오도록 목록에서 고르거나 추천을 누르세요. 목록에 없는 품목은 "새 품목"으로 등록합니다. 고친 표기는 회사 공용으로 기억해 다음부터 자동으로 바꿉니다.
+        {editable && (
+          <div className={`border-b border-line px-4 py-2 text-[12.5px] ${badCount ? 'bg-red-50 text-red-700' : 'bg-canvas text-muted'}`}>
+            품목은 한 줄씩 직접 작성합니다 (복사·붙여넣기 안 됨). 품명·규격은 목록에서 고르고, 목록에 없는 품목은 "+ 새 품목 등록" 후 고르세요.
+            {badCount > 0 && <b> 기준 품명·규격이 아닌 줄 {badCount}개 (빨간 칸)를 고쳐야 보낼 수 있습니다.</b>}
           </div>
         )}
-        <div className="overflow-auto">
+        <div
+          className="overflow-auto"
+          // 견적 의뢰 품목은 직접 작성만: 붙여넣기·끌어다 놓기 막음
+          onPasteCapture={(e) => {
+            if (!editable) return;
+            e.preventDefault();
+            toast('견적 의뢰서는 붙여넣기를 할 수 없습니다. 목록에서 골라 직접 작성하세요.', 'err');
+          }}
+          onDropCapture={(e) => editable && e.preventDefault()}
+        >
           <table className="tbl text-[12.5px]">
             <thead>
               <tr>
@@ -576,25 +568,6 @@ function RfqDetail({ id }: { id: string }) {
       </div>
 
       <Modal
-        open={paste !== null}
-        title="엑셀에서 붙여넣기"
-        onClose={() => setPaste(null)}
-        footer={
-          <>
-            <button className="btn-ghost" onClick={() => setPaste(null)}>
-              취소
-            </button>
-            <button className="btn-primary" onClick={pasteLines}>
-              추가
-            </button>
-          </>
-        }
-      >
-        <div className="mb-2 rounded-md bg-canvas px-3 py-2 font-mono text-[12px]">품명 ⇥ 규격 ⇥ 단위 ⇥ 수량</div>
-        <textarea className="input h-48 w-full font-mono text-[12px]" value={paste ?? ''} onChange={(e) => setPaste(e.target.value)} />
-      </Modal>
-
-      <Modal
         open={!!entry}
         wide
         title={entry ? `견적 입력 · ${entry.vendor.name}` : ''}
@@ -675,6 +648,13 @@ function RfqDetail({ id }: { id: string }) {
                   const now = Date.now();
                   await commitBatch([{ type: 'set', col: C.items, id: newId(C.items), data: { itemName: newItem.itemName.trim(), spec: newItem.spec.trim(), unit: newItem.unit.trim(), status: 'active', createdAt: now, requestedByName: who, note: `견적 의뢰 ${d.rfqNo}에서 등록` } }]);
                   const old = d.lines.find((x) => x.key === newItem.key);
+                  if (!old) {
+                    const nl = { key: lineKey(), itemName: newItem.itemName.trim(), spec: newItem.spec.trim(), unit: newItem.unit.trim(), qty: 0 };
+                    setD({ ...d, lines: [...d.lines.filter((l) => l.itemName.trim()), nl] });
+                    setNewItem(null);
+                    toast('품목 목록에 등록하고 의뢰서에 한 줄 추가했습니다. 수량을 넣으세요.');
+                    return;
+                  }
                   setLine(newItem.key, { itemName: newItem.itemName.trim(), spec: newItem.spec.trim(), unit: newItem.unit.trim(), ...(old && (old.srcItem || aliasKey(old.itemName, old.spec) !== aliasKey(newItem.itemName, newItem.spec)) ? { srcItem: old.srcItem ?? old.itemName, srcSpec: old.srcSpec ?? old.spec } : {}) });
                   setNewItem(null);
                   toast('품목·단가의 품목 목록에 등록했습니다. 청구서에서도 같은 품명으로 씁니다.');
