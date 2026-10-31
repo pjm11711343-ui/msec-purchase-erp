@@ -16,6 +16,7 @@ export interface PriceRow {
   negoRate: number; // 네고율(%)
   buyPrice: number; // 구매단가
   maker?: string;
+  category?: string; // 단가관리시스템의 분류 (있으면)
 }
 
 const pick = (d: DocumentData, ...keys: string[]) => {
@@ -39,6 +40,7 @@ function toRow(d: DocumentData, vendorId: string, vendorName: string): PriceRow 
     negoRate,
     buyPrice,
     maker: pick(d, 'maker', '메이커') as string | undefined,
+    ...(pick(d, 'category', 'categoryName', '분류', '자재분류') ? { category: String(pick(d, 'category', 'categoryName', '분류', '자재분류')) } : {}),
   };
 }
 
