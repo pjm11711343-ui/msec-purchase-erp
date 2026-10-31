@@ -202,7 +202,12 @@ export default function ReqEdit() {
     return sp ? { ...sp, scope: '현장' } : { ...c.last, scope: '전체' };
   };
 
-  if (!d) return <div className="text-muted">{reqs.loading || sites.loading ? '불러오는 중…' : '청구서를 찾을 수 없습니다.'}</div>;
+  if (!d)
+    return (
+      <div className="text-muted">
+        {reqs.loading || sites.loading ? '불러오는 중…' : readOnly ? '앞 단계(관리자·자재부) 결재가 끝나 결재 차례가 오면 볼 수 있습니다.' : '청구서를 찾을 수 없습니다.'}
+      </div>
+    );
 
   // 작성중·반려: 작성자·자재부 / 결재 중(최종 승인 전): 작성자·자재부·결재선에 있는 사람도 내용 수정 가능
   const draftEditable = !readOnly && !inTrash && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);

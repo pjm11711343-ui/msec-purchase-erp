@@ -5,12 +5,26 @@ import { C } from './firebase';
 import { priceKey } from './prices';
 import type { ApprovalLine, ErpUser, ReqLine, Requisition } from '../types';
 
+/**
+ * 결재자(대표·사장 등 executive)는 앞 단계(관리자·자재부 등) 결재가 끝나 자기 차례가 오기 전에는 청구서를 볼 수 없다.
+ * 볼 수 있는 것: 최종 승인된 청구서, 결재 중이면서 자기 칸까지 차례가 온 청구서(이미 결재한 것 포함)
+ */
+export function execCanSee(r: Requisition, uid?: string): boolean {
+  if (r.status === 'approved') return true;
+  if (!uid) return false;
+  const mine = r.steps.map((s, i) => (s.userId === uid ? i : -1)).filter((i) => i >= 0);
+  if (!mine.length) return false;
+  if (r.steps.some((s) => s.userId === uid && s.result)) return true; // 이미 결재(승인·반려)한 청구서
+  return r.status === 'pending' && mine.some((i) => i <= r.currentStep);
+}
+
 export function useRequisitions() {
-  const { siteIds } = useAuth();
+  const { siteIds, profile } = useAuth();
   const all = useCollection<Requisition>(C.requisitions, [orderBy('createdAt', 'desc')], '', siteIds === null);
   const scoped = useSiteScoped<Requisition>(C.requisitions, siteIds === null ? [] : siteIds);
   const src = siteIds === null ? all : scoped;
-  const sorted = [...src.data].sort((a, b) => b.createdAt - a.createdAt);
+  const isExec = profile?.role === 'executive';
+  const sorted = [...src.data].filter((r) => !isExec || execCanSee(r, profile?.id)).sort((a, b) => b.createdAt - a.createdAt);
   // 휴지통에 있는 청구서는 목록·기반입·집계에서 뺀다
   const data = sorted.filter((r) => !r.deletedAt);
   const trash = sorted.filter((r) => r.deletedAt).sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
