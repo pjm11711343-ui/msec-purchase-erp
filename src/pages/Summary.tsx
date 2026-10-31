@@ -6,6 +6,8 @@ import { C } from '../lib/firebase';
 import { summarize, useLedger, useSiteCategories, useSites, useStandardCategories } from '../lib/hooks';
 import { num, pct, won } from '../lib/normalize';
 import { Empty, errMsg, PageHeader, RateBar, Stat, useToast } from '../components/ui';
+import { SiteCatDelete, SiteCatEditor } from '../components/SiteCatTools';
+import type { SiteCategory } from '../types';
 
 type Editable = 'contractAmount' | 'changeAmount' | 'execAmount' | 'migratedInput';
 
@@ -21,6 +23,8 @@ export default function Summary() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, Partial<Record<Editable, string>>>>({});
   const [showMonths, setShowMonths] = useState(true);
+  const [catEdit, setCatEdit] = useState<SiteCategory | 'new' | null>(null); // 분류 추가·수정
+  const [catDel, setCatDel] = useState<SiteCategory | null>(null);
 
   useEffect(() => {
     if (!siteId && sites.data.length) setSiteId(sites.data[0].id);
@@ -49,6 +53,20 @@ export default function Summary() {
   const monthTotal = (m: string) => rows.reduce((a, r) => a + (r.byMonth[m] ?? 0), 0);
   const stdName = (id?: string) => std.data.find((s) => s.id === id)?.name;
   const canEdit = can('admin', 'material');
+  /** 분류 순서 바꾸기 (위·아래) */
+  const moveCat = async (id: string, dir: -1 | 1) => {
+    const list = rows.map((r) => r.cat);
+    const i = list.findIndex((c) => c.id === id);
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    try {
+      await commitBatch(next.map((c, k) => ({ type: 'set' as const, col: C.siteCategories, id: c.id, data: { order: k + 1 } })));
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    }
+  };
 
   const exportExcel = () => {
     if (!site) return;
@@ -129,6 +147,11 @@ export default function Summary() {
             <button className="btn-ghost" onClick={() => setShowMonths((v) => !v)}>
               {showMonths ? '월별 숨기기' : '월별 보기'}
             </button>
+            {canEdit && site && (
+              <button className="btn-ghost" onClick={() => setCatEdit('new')}>
+                + 분류 추가
+              </button>
+            )}
             {canEdit &&
               (editing ? (
                 <>
@@ -141,7 +164,7 @@ export default function Summary() {
                 </>
               ) : (
                 <button className="btn-ghost" onClick={() => setEditing(true)} disabled={!rows.length}>
-                  금액 수정
+                  금액·분류 수정
                 </button>
               ))}
             <button className="btn-dark" onClick={exportExcel} disabled={!rows.length}>
@@ -183,7 +206,27 @@ export default function Summary() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.cat.id}>
-                      <td className="font-medium">{r.cat.name}</td>
+                      <td className="font-medium">
+                        {editing ? (
+                          <div className="flex items-center gap-1">
+                            <button className="px-0.5 text-muted hover:text-ink" title="위로" onClick={() => moveCat(r.cat.id, -1)}>
+                              ▲
+                            </button>
+                            <button className="px-0.5 text-muted hover:text-ink" title="아래로" onClick={() => moveCat(r.cat.id, 1)}>
+                              ▼
+                            </button>
+                            <span className="min-w-0 flex-1 truncate">{r.cat.name}</span>
+                            <button className="text-[11.5px] text-sky-700 hover:underline" onClick={() => setCatEdit(r.cat)}>
+                              수정
+                            </button>
+                            <button className="text-[11.5px] text-muted hover:text-red-600" onClick={() => setCatDel(r.cat)}>
+                              삭제
+                            </button>
+                          </div>
+                        ) : (
+                          r.cat.name
+                        )}
+                      </td>
                       <td className="text-muted">{stdName(r.cat.standardCategoryId) ?? <span className="text-amber-700">미지정</span>}</td>
                       <td className="num">{cellInput(r.cat.id, 'contractAmount', r.cat.contractAmount)}</td>
                       <td className="num">{cellInput(r.cat.id, 'changeAmount', r.cat.changeAmount)}</td>
@@ -222,10 +265,12 @@ export default function Summary() {
                 </tbody>
               </table>
             </div>
-            {!rows.length && <Empty>이 현장에는 분류가 없습니다. 청구서 파일 이관에서 가져오세요.</Empty>}
+            {!rows.length && <Empty>이 현장에는 분류가 없습니다. 청구서 파일 이관에서 가져오거나 "+ 분류 추가"로 만드세요.</Empty>}
           </div>
         </>
       )}
+      {catEdit && site && <SiteCatEditor siteId={site.id} cat={catEdit === 'new' ? undefined : catEdit} cats={cats.data} std={std.data} onClose={() => setCatEdit(null)} />}
+      {catDel && <SiteCatDelete cat={catDel} cats={cats.data} ledger={ledger.data} onClose={() => setCatDel(null)} />}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { audit, commitBatch, newId } from '../../lib/db';
 import { C } from '../../lib/firebase';
-import { useSiteCategories, useSites, useStandardCategories } from '../../lib/hooks';
+import { useLedger, useSiteCategories, useSites, useStandardCategories } from '../../lib/hooks';
+import { SiteCatDelete, SiteCatEditor } from '../../components/SiteCatTools';
 import { categoryKey, won } from '../../lib/normalize';
 import { Empty, errMsg, PageHeader, useSelection, useToast } from '../../components/ui';
 import type { SiteCategory, StandardCategory, Trade } from '../../types';
@@ -25,6 +26,9 @@ export default function Categories() {
   const [newTrade, setNewTrade] = useState<Trade>('기계');
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'map' | 'dict'>('map');
+  const [catEdit, setCatEdit] = useState<SiteCategory | 'new' | null>(null);
+  const [catDel, setCatDel] = useState<SiteCategory | null>(null);
+  const ledger = useLedger();
 
   const siteOf = (id: string) => sites.data.find((s) => s.id === id);
   const shown = useMemo(
@@ -248,6 +252,13 @@ export default function Categories() {
             <label className="flex items-center gap-1 text-[12px]">
               <input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)} /> 미지정만
             </label>
+            <button
+              className="btn-dark h-7 text-[12px]"
+              title={siteFilter ? '' : '현장을 먼저 고르세요'}
+              onClick={() => (siteFilter ? setCatEdit('new') : toast('분류를 추가할 현장을 위 목록에서 먼저 고르세요.', 'err'))}
+            >
+              + 현장 분류 추가
+            </button>
           </div>
           {sel.size > 0 && (
             <div className="flex items-center gap-2 border-b border-line bg-amber-soft px-4 py-2">
@@ -277,6 +288,7 @@ export default function Categories() {
                   <th>계산서 표기</th>
                   <th className="num">실행</th>
                   <th>표준분류</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -286,7 +298,11 @@ export default function Categories() {
                       <input type="checkbox" checked={sel.has(c.id)} onChange={() => toggle(c.id)} />
                     </td>
                     <td className="whitespace-nowrap text-muted">{siteOf(c.siteId)?.name}</td>
-                    <td className="font-medium">{c.name}</td>
+                    <td className="font-medium">
+                      <button className="text-left hover:text-amber-700 hover:underline" title="분류 수정" onClick={() => setCatEdit(c)}>
+                        {c.name}
+                      </button>
+                    </td>
                     <td className="text-[11.5px] text-muted">{(c.aliases ?? []).join(', ')}</td>
                     <td className="num">{won(c.execAmount)}</td>
                     <td>
@@ -303,6 +319,14 @@ export default function Categories() {
                         ))}
                       </select>
                     </td>
+                    <td className="whitespace-nowrap text-right">
+                      <button className="text-[12px] text-sky-700 hover:underline" onClick={() => setCatEdit(c)}>
+                        수정
+                      </button>
+                      <button className="ml-2 text-[12px] text-muted hover:text-red-600" onClick={() => setCatDel(c)}>
+                        삭제
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -312,6 +336,10 @@ export default function Categories() {
         </div>
       </div>
       )}
+      {catEdit && (catEdit !== 'new' || siteFilter) && (
+        <SiteCatEditor siteId={catEdit === 'new' ? siteFilter : catEdit.siteId} cat={catEdit === 'new' ? undefined : catEdit} cats={cats.data} std={std.data} onClose={() => setCatEdit(null)} />
+      )}
+      {catDel && <SiteCatDelete cat={catDel} cats={cats.data} ledger={ledger.data} onClose={() => setCatDel(null)} />}
     </div>
   );
 }
