@@ -62,7 +62,7 @@ export default function VendorPortal() {
 
   return (
     <div className="min-h-full bg-canvas">
-      <header className="no-print flex items-center gap-3 bg-navy-950 px-6 py-3 text-white">
+      <header className="no-print flex items-center gap-3 bg-navy-950 px-3 py-3 text-white sm:px-6">
         <div>
           <div className="text-[11px] tracking-[0.2em] text-amber-brand">MYUNGSIN · 협력업체</div>
           <div className="text-[16px] font-bold">{vendor?.vendorName}</div>
@@ -72,8 +72,8 @@ export default function VendorPortal() {
           로그아웃
         </button>
       </header>
-      <div className="mx-auto max-w-[1280px] p-5">
-        <div className="no-print mb-4 flex gap-1">
+      <div className="mx-auto max-w-[1280px] p-2.5 sm:p-5">
+        <div className="no-print mb-4 grid grid-cols-3 gap-1 sm:flex">
           {(['po', 'statement', 'rfq'] as const).map((t) => (
             <button key={t} className={`rounded-md px-4 py-1.5 text-[13px] font-semibold ${page === t ? 'bg-navy-950 text-white' : 'bg-white text-muted hover:text-ink'}`} onClick={() => (setPage(t), setOpen(null))}>
               {t === 'po' ? '발주서 · 입고' : t === 'statement' ? '거래명세서' : '견적 요청'}
@@ -97,7 +97,48 @@ export default function VendorPortal() {
             {!list.length ? (
               <Empty>{pos.loading ? '불러오는 중…' : '받은 발주서가 없습니다.'}</Empty>
             ) : (
-              <table className="tbl">
+              <>
+              {/* 폰: 발주 카드 */}
+              <div className="flex flex-col gap-2 bg-canvas p-2 md:hidden">
+                {list.map(({ p, prog }) => (
+                  <div key={p.id} className="flex flex-col gap-1.5 rounded-xl border border-line bg-white p-3">
+                    <button className="flex flex-col gap-1.5 text-left" onClick={() => (setOpen(p.id), setView('receipt'))}>
+                      <div className="flex w-full items-center justify-between">
+                        <span className="text-[14.5px] font-bold text-navy-950">{p.poNo}</span>
+                        <span className="text-[11.5px] text-muted">{p.orderDate}</span>
+                      </div>
+                      <span className="text-[12px] text-muted">
+                        {p.siteName} · {p.lines[0]?.itemName}
+                        {p.lines.length > 1 && ` 외 ${p.lines.length - 1}건`}
+                      </span>
+                      <div className="flex w-full items-center gap-2">
+                        <span className="w-14 text-[12px]">{prog.state}</span>
+                        <div className="flex-1">
+                          <RateBar rate={prog.rate} />
+                        </div>
+                      </div>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      {p.ackAt ? (
+                        <>
+                          <span className="chip bg-emerald-50 text-emerald-700">발주 확인함</span>
+                          <button className="ml-auto text-[12px] text-muted" onClick={() => unack(p.id)}>
+                            확인 취소
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn-primary h-10 flex-1" onClick={() => ack(p.id)}>
+                          발주 확인{p.revisedAt ? ' (변경됨)' : ''}
+                        </button>
+                      )}
+                      <button className="btn-dark h-10 flex-1" onClick={() => (setOpen(p.id), setView('receipt'))}>
+                        입고 등록
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <table className="tbl hidden md:table">
                 <thead>
                   <tr>
                     <th>발주일</th>
@@ -147,6 +188,7 @@ export default function VendorPortal() {
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         ) : (

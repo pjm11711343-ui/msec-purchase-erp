@@ -234,7 +234,40 @@ export default function ReqList() {
         ) : !shown.length ? (
           <Empty>{reqs.loading ? '불러오는 중…' : tab === 'inbox' ? '결재할 청구서가 없습니다.' : '청구서가 없습니다.'}</Empty>
         ) : (
-          <div className="max-h-[calc(100vh-220px)] overflow-auto">
+          <>
+          {/* 폰: 카드 목록 */}
+          <div className="flex flex-col gap-2 bg-canvas p-2 md:hidden">
+            {shown.map((r) => {
+              const mine = isMyTurn(r, profile?.id, can('admin'));
+              return (
+                <Link key={r.id} to={`/req/${r.id}`} className="flex flex-col gap-1.5 rounded-xl border border-line bg-white p-3 active:bg-amber-soft/40">
+                  <div className="flex items-center gap-2">
+                    <StatusChip s={r.status} />
+                    {mine && <span className="chip bg-amber-brand text-navy-950">내 차례</span>}
+                    <span className="ml-auto text-[11.5px] text-muted">{r.requestDate}</span>
+                  </div>
+                  <div className="text-[14.5px] font-bold text-navy-950">
+                    {r.siteName} · {r.docNo || '(번호 없음)'}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+                    {r.processName && <span className="chip bg-navy-950/5 text-navy-900">{r.processName}</span>}
+                    <span className="truncate">
+                      {r.lines[0]?.itemName}
+                      {r.lines.length > 1 && ` 외 ${r.lines.length - 1}건`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11.5px] text-muted">
+                      {r.createdByName}
+                      {r.status === 'pending' && ` · ${r.steps[r.currentStep]?.label ?? ''} ${r.steps[r.currentStep]?.userName ?? ''}`}
+                    </span>
+                    <span className="text-[14px] font-bold">{won(r.totalAmount)}원</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+          <div className="hidden max-h-[calc(100vh-220px)] overflow-auto md:block">
             <table className="tbl">
               <thead>
                 <tr>
@@ -286,6 +319,7 @@ export default function ReqList() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>

@@ -96,6 +96,77 @@ body {
   @apply min-w-0 text-[12px];
 }
 
+/* ───────── 폰·태블릿 ───────── */
+/* 손가락으로 누르는 기기: 입력칸·버튼을 조금 크게 */
+@media (pointer: coarse) {
+  .input,
+  .btn,
+  .btn-primary,
+  .btn-dark,
+  .btn-ghost,
+  .btn-danger {
+    min-height: 36px;
+  }
+  /* 아이폰에서 입력할 때 화면이 확대되지 않게 (16px 미만이면 자동 확대) */
+  input.input,
+  select.input,
+  textarea.input {
+    font-size: 16px;
+  }
+}
+/* 폰: 글씨·여백 한 단계 작게, 넓은 표는 카드 안에서 가로로 밀기 */
+@media (max-width: 767px) {
+  body {
+    font-size: 12.5px;
+  }
+  .tbl {
+    font-size: 12px;
+  }
+  .tbl th,
+  .tbl td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .card.overflow-hidden {
+    overflow-x: auto;
+  }
+  .card .tbl:not(.req-tbl) {
+    min-width: max-content;
+  }
+  .card .tbl:not(.req-tbl) td {
+    white-space: nowrap;
+  }
+}
+/* 태블릿·작은 노트북: 구매청구서 품목표는 가로로 밀고, 번호·품명 열은 왼쪽에 고정 */
+@media (max-width: 1279px) {
+  .req-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .req-scroll .req-tbl {
+    min-width: 1500px;
+  }
+  .req-tbl thead tr:first-child th:nth-child(1),
+  .req-tbl tbody tr:not(.req-total) td:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: #fff;
+  }
+  .req-tbl thead tr:first-child th:nth-child(2),
+  .req-tbl tbody tr:not(.req-total) td:nth-child(2) {
+    position: sticky;
+    left: 24px;
+    z-index: 3;
+    background: #fff;
+    box-shadow: 2px 0 0 #c9ced8;
+  }
+  .req-tbl thead tr:first-child th:nth-child(1),
+  .req-tbl thead tr:first-child th:nth-child(2) {
+    background: #f7f8fb;
+  }
+}
+
 /* 발주서 인쇄 / PDF 저장 */
 @media print {
   @page {
@@ -109,6 +180,7 @@ body {
     background: #fff !important;
   }
   aside,
+  header.no-print,
   .no-print,
   .fixed {
     display: none !important;

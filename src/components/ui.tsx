@@ -39,9 +39,9 @@ export function Modal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-navy-950/40 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-navy-950/40 p-2 sm:p-6" onMouseDown={onClose}>
       <div
-        className={`card fade-up mt-10 w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} shadow-xl`}
+        className={`card fade-up mt-2 w-full sm:mt-10 ${wide ? 'max-w-4xl' : 'max-w-lg'} shadow-xl`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
@@ -50,8 +50,8 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+        <div className="max-h-[75vh] overflow-auto px-3 py-3 sm:px-5 sm:py-4">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-3 py-3 sm:px-5">{footer}</div>}
       </div>
     </div>
   );

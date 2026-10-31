@@ -202,7 +202,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
         </div>
       </div>
       )}
-      <table className="tbl">
+      <div className="overflow-x-auto"><table className="tbl">
         <thead>
           <tr>
             <th className="w-8">
@@ -312,7 +312,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       <div className="flex items-center gap-2 border-t border-line px-4 py-2">
         <span className="font-semibold">입고 기록 {mine.length}건</span>
@@ -328,7 +328,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
         )}
       </div>
       {mine.length > 0 && (
-        <table className="tbl">
+        <div className="overflow-x-auto"><table className="tbl">
           <thead>
             <tr>
               <th>입고일</th>
@@ -368,7 +368,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

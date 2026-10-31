@@ -66,6 +66,7 @@ export default function ReqEdit() {
   const [comment, setComment] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const [phoneTable, setPhoneTable] = useState(false); // 폰: 기본은 카드, 수정할 때 표
   const [priceFor, setPriceFor] = useState<string | null>(null); // 단가 후보 보기 (line key)
   const [newItem, setNewItem] = useState<{ itemName: string; spec: string; unit: string; note: string } | null>(null); // 새 품목 등록·요청
 
@@ -1000,7 +1001,58 @@ export default function ReqEdit() {
         {!d.lines.length ? (
           <Empty>품목이 없습니다.</Empty>
         ) : (
-          <div>
+          <>
+          {/* 폰: 품목 카드 */}
+          {!phoneTable && (
+            <div className="flex flex-col gap-2 bg-canvas p-2 md:hidden">
+              {d.lines
+                .filter((l) => l.itemName.trim())
+                .map((l) => {
+                  const pq = priorOf(l);
+                  const remain = l.execQty ? l.execQty - pq - l.reqQty : null;
+                  const over = remain != null && remain < 0;
+                  return (
+                    <div key={l.key} className={`flex flex-col gap-1.5 rounded-xl border bg-white p-3 ${over ? 'border-red-300' : 'border-line'}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[14px] font-bold">{l.itemName}</span>
+                        <span className="text-right text-[12.5px] text-muted">{l.spec}</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1 text-[11.5px] text-muted">
+                        <span>실행 {l.execQty ? l.execQty.toLocaleString() : '-'}</span>
+                        <span>기반입 {pq ? pq.toLocaleString() : '-'}</span>
+                        <span className="font-bold text-ink">
+                          금회 {l.reqQty ? l.reqQty.toLocaleString() : '-'}
+                          {l.unit}
+                        </span>
+                        <span className={over ? 'font-bold text-red-600' : ''}>잔여 {remain == null ? '-' : remain.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-[12px]">
+                        <span className="truncate text-muted">
+                          {[l.vendorName, catName(l.siteCategoryId), l.remark].filter(Boolean).join(' · ')}
+                          {d.zoneId && !baseByItem.has(itemKey(l.itemName, l.spec)) && <span className="ml-1 text-violet-700">내역 외</span>}
+                        </span>
+                        <span className="shrink-0 font-semibold">{lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }) ? `${won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}원` : ''}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              <div className="flex items-center justify-between px-1 py-1 text-[13px]">
+                <span className="text-muted">합계</span>
+                <b>{won(d.lines.reduce((a, l) => a + lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }), 0))}원</b>
+              </div>
+              <button className="btn-ghost h-10 border-dashed" onClick={() => setPhoneTable(true)}>
+                {editable || orderEditable ? '표로 보기 · 수정 (가로로 밀기)' : '표로 보기 (가로로 밀기)'}
+              </button>
+            </div>
+          )}
+          {phoneTable && (
+            <div className="border-b border-line px-3 py-2 md:hidden">
+              <button className="btn-ghost h-9 w-full" onClick={() => setPhoneTable(false)}>
+                카드로 보기
+              </button>
+            </div>
+          )}
+          <div className={`req-scroll ${phoneTable ? '' : 'hidden md:block'}`}>
             <table className="tbl req-tbl w-full table-fixed text-[12px]">
               <colgroup>
                 <col style={{ width: 24 }} />
@@ -1222,7 +1274,7 @@ export default function ReqEdit() {
                     </tr>
                   );
                 })}
-                <tr className="bg-[#f7f8fb] font-semibold">
+                <tr className="req-total bg-[#f7f8fb] font-semibold">
                   <td colSpan={12} className="text-right">
                     합계
                   </td>
@@ -1275,10 +1327,28 @@ export default function ReqEdit() {
               </div>
             </div>
           </div>
+          </>
         )}
       </div>
 
       {d.siteId && <SummaryPanel sum={summary} />}
+      {/* 폰: 결재 버튼을 화면 아래에 고정 */}
+      {myTurn && (
+        <>
+          <div className="h-36 md:hidden" aria-hidden />
+          <div className="no-print fixed inset-x-0 bottom-0 z-30 flex flex-col gap-2 border-t border-line bg-white px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-4px_16px_rgba(10,18,32,0.08)] md:hidden">
+            <input className="input h-10 w-full" placeholder="의견 (반려 시 필수)" value={comment} onChange={(e) => setComment(e.target.value)} />
+            <div className="flex gap-2">
+              <button className="btn-danger h-12 flex-1 text-[15px]" disabled={busy} onClick={() => decide('rejected')}>
+                반려
+              </button>
+              <button className="btn-dark h-12 flex-[2] text-[15px] font-bold" disabled={busy} onClick={() => decide('approved')}>
+                승인
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {d.history.length > 0 && (
         <div className="card mt-4 px-4 py-3">
