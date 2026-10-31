@@ -20,6 +20,7 @@ import { PoChip, PreChip } from './PoList';
 import type { PoLine, PurchaseOrder, Site } from '../../types';
 import { useAdminMemos } from '../../lib/adminMemo';
 import AdminMemoInput from '../../components/AdminMemoInput';
+import { boxLabel, isSiteStepLabel } from '../../lib/approvalTemplates';
 
 export const MIN_ROWS = 18;
 
@@ -27,14 +28,10 @@ function spaced(s: string) {
   return s.split('').join(' ');
 }
 
-/** 결재선(2단계/6칸)을 발주서 결재란 위치에 맞춘다 */
-export function signBoxes(po: PurchaseOrder, signOf?: (re: RegExp) => string | undefined) {
-  const find = (re: RegExp) => po.signNames.find((s) => re.test(s.label.replace(/\s/g, '')))?.name;
-  const box = (label: string, re: RegExp) => ({ label, name: find(re), sign: signOf?.(re) });
-  return {
-    site: [box('담  당', /^현장담당/), box('소  장', /소장/)],
-    hq: [box('담  당', /^본사담당|^자재부/), box('팀  장', /팀장/), box('임  원', /임원/), box('대  표', /대표/)],
-  };
+/** 결재선(2단계/전자결재 7칸)을 발주서 결재란에 순서대로 놓는다 (현장 칸 / 본사 칸) */
+export function signBoxes(po: PurchaseOrder, signOf?: (index: number) => string | undefined) {
+  const all = po.signNames.map((s, i) => ({ label: boxLabel(s.label), name: s.name, sign: signOf?.(i), site: isSiteStepLabel(s.label) }));
+  return { site: all.filter((b) => b.site), hq: all.filter((b) => !b.site) };
 }
 
 export default function PoDetail() {
@@ -49,9 +46,9 @@ export default function PoDetail() {
   const users = useUsers();
   const signs = signMap(users.data);
   /** 결재란 싸인: 연결된 청구서에서 그 칸 결재자가 승인했으면 싸인 이미지 */
-  const signOf = (re: RegExp) => {
+  const signOf = (index: number) => {
     const r = reqs.data.find((x) => po?.reqIds.includes(x.id));
-    const st = r?.steps.find((s) => re.test(s.label.replace(/\s/g, '')));
+    const st = r?.steps[index];
     return st?.result === 'approved' && st.userId ? signs.byId.get(st.userId) : undefined;
   };
   const sites = useSites();
@@ -238,7 +235,7 @@ export default function PoDetail() {
             <input type="checkbox" checked={showPrice} onChange={(e) => setShowPrice(e.target.checked)} /> 단가 표시
           </label>
           <label className="flex items-center gap-1 text-[12px]">
-            <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> 내부 결재란(6칸)
+            <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> 내부 결재란(전자결재)
           </label>
           <button className="btn-dark" onClick={() => window.print()}>
             인쇄 / PDF 저장
@@ -497,7 +494,7 @@ export function PoSheet({
             {(internal ? [...boxes.site, ...boxes.hq] : boxes.hq.slice(0, 2)).map((s, i) => (
               <td key={i} className={`${head} w-14 py-0.5 text-[11px]`}>
                 {internal && i === 0 && <span className="mr-0.5 text-[9px] text-gray-500">현</span>}
-                {internal && i === 2 && <span className="mr-0.5 text-[9px] text-gray-500">본</span>}
+                {internal && i === boxes.site.length && <span className="mr-0.5 text-[9px] text-gray-500">본</span>}
                 {s.label}
               </td>
             ))}

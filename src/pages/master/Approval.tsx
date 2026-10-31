@@ -6,10 +6,7 @@ import { useSites } from '../../lib/hooks';
 import { Empty, errMsg, PageHeader, useToast } from '../../components/ui';
 import { ROLE_LABEL, type ApprovalLine, type ErpUser } from '../../types';
 
-const TEMPLATES: Record<ApprovalLine['type'], string[]> = {
-  '2단계': ['현장소장', '자재부'],
-  '6칸': ['현장 담당', '현장 소장', '본사 담당', '본사 팀장', '본사 임원', '본사 대표'],
-};
+import { TEMPLATES, TYPE_LABEL, upgradeSteps } from '../../lib/approvalTemplates';
 const DEFAULT_ID = '_default';
 
 type Draft = Record<string, ApprovalLine>;
@@ -29,7 +26,11 @@ export default function Approval() {
     setDirty(new Set());
   }, [lines.data]);
 
-  const get = (id: string): ApprovalLine =>
+  const get = (id: string): ApprovalLine => {
+    const l = getRaw(id);
+    return { ...l, steps: upgradeSteps(l.type, l.steps) };
+  };
+  const getRaw = (id: string): ApprovalLine =>
     draft[id] ??
     (id === DEFAULT_ID
       ? { id, siteId: DEFAULT_ID, type: '2단계', steps: TEMPLATES['2단계'].map((label) => ({ label })) }
@@ -74,8 +75,8 @@ export default function Approval() {
               set(id, { ...l, type, steps: TEMPLATES[type].map((label) => ({ label })) });
             }}
           >
-            <option>2단계</option>
-            <option>6칸</option>
+            <option value="2단계">{TYPE_LABEL['2단계']}</option>
+            <option value="6칸">{TYPE_LABEL['6칸']}</option>
           </select>
         </td>
         <td>

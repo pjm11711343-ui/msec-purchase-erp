@@ -27,10 +27,7 @@ import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
 import { similarity } from '../../lib/catMatch';
 import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
 
-const TEMPLATES: Record<Requisition['approvalType'], string[]> = {
-  '2단계': ['현장소장', '자재부'],
-  '6칸': ['현장 담당', '현장 소장', '본사 담당', '본사 팀장', '본사 임원', '본사 대표'],
-};
+import { TEMPLATES, TYPE_LABEL, upgradeSteps } from '../../lib/approvalTemplates';
 const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 
 type Draft = Omit<Requisition, 'id'> & { id?: string };
@@ -107,7 +104,7 @@ export default function ReqEdit() {
   const defaultSteps = (siteId: string): { type: Requisition['approvalType']; steps: ApprovalStepState[] } => {
     const l = lines.data.find((x) => x.id === siteId) ?? lines.data.find((x) => x.id === '_default');
     const type = l?.type ?? '2단계';
-    const steps = (l?.steps ?? TEMPLATES[type].map((label) => ({ label, userId: undefined as string | undefined }))).map((s) => ({
+    const steps = upgradeSteps(type, l?.steps ?? TEMPLATES[type].map((label) => ({ label, userId: undefined as string | undefined }))).map((s) => ({
       label: s.label,
       userId: s.userId,
       userName: users.data.find((u) => u.id === s.userId)?.name,
@@ -916,8 +913,8 @@ export default function ReqEdit() {
                 setD({ ...d, approvalType: type, steps: TEMPLATES[type].map((label) => ({ label })) });
               }}
             >
-              <option>2단계</option>
-              <option>6칸</option>
+              <option value="2단계">{TYPE_LABEL['2단계']}</option>
+              <option value="6칸">{TYPE_LABEL['6칸']}</option>
             </select>
             {draftEditable && (
               <button className="text-[12px] text-muted hover:text-ink" onClick={() => setD({ ...d, ...(({ type, steps }) => ({ approvalType: type, steps }))(defaultSteps(d.siteId)) })}>
@@ -1325,7 +1322,7 @@ export default function ReqEdit() {
                         <div key={i} className="w-[76px] border-r border-navy-900/30 text-center last:border-r-0">
                           <div className="border-b border-navy-900/30 bg-[#f7f8fb] py-0.5 text-[11px]">{s.label.replace(/^(현장|본사)\s*/, '') || s.label}</div>
                           <div className="flex h-12 flex-col items-center justify-center text-[11.5px]">
-                            {s.result === 'skipped' || !s.userId ? (
+                            {s.result === 'skipped' || (!s.userId && s.result !== 'approved') ? (
                               <span className="text-muted">/</span>
                             ) : (
                               <>

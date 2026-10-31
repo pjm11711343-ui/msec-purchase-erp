@@ -6,25 +6,61 @@
 //     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 '사용 목적', T8 사용 목적 내용)
 //   분류 요약: 22·24·26·28행 B 분류 · C 계약 · D 변경(예상) · G 실행 · H 기반입금액 · I 금회청구
 //     금회청구 칸(I~M): 업체명은 위 작은 줄, 금액은 아래 줄 (22·24·26행 3곳, 28행 2곳). 전체는 '투입집계' 시트
-//   결재란: 29행 머리글, 31~32행 이름·승인일 (현장 M 담당 · O 소장 / 본사 T 담당 · U 팀장 · V 임원 · W 대표)
+//   결재란: 29행 머리글, 31~32행 이름·승인일 (현장 M·O / 본사 T·U·V·W, 본사 5칸이면 R:S·T·U·V·W) — 결재선 순서대로
 //   B32 날짜, I32 합계
 import type ExcelJS from 'exceljs';
 import type { Requisition } from '../types';
 import { bonNote } from './pipe';
+import { boxLabel, isSiteStepLabel } from './approvalTemplates';
 import { NO_VENDOR, type ReqSummary, type SumRow } from './reqSummary';
 
 // 7행은 사용 위치·공정 제목 줄 → 품목은 8~20행(1쪽 13줄), 이어서 35~188행
 export const ITEM_ROWS = [...Array.from({ length: 13 }, (_, i) => 8 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
 
 
-const SIGN_COL: { test: RegExp; col: string }[] = [
-  { test: /현장\s*담당/, col: 'M' },
-  { test: /소장/, col: 'O' },
-  { test: /대표/, col: 'W' },
-  { test: /임원/, col: 'V' },
-  { test: /팀장/, col: 'U' },
-  { test: /(본사\s*담당|자재부)/, col: 'T' },
-];
+/**
+ * 결재란 칸 위치: 현장 칸 M·O, 본사 칸 T·U·V·W.
+ * 본사 칸이 5개(전자결재 7칸: 담당·담당·팀장·사장·대표이사)면 '본사' 글자를 Q로 옮기고 R:S를 첫 칸으로 쓴다.
+ */
+function signLayout(ws: ExcelJS.Worksheet, steps: Requisition['steps']): { col: string; site: boolean; w: number }[] {
+  const site = steps.map((st) => isSiteStepLabel(st.label));
+  const hqN = site.filter((x) => !x).length;
+  const siteCols = ['M', 'O'];
+  const hqCols = hqN > 4 ? ['R', 'T', 'U', 'V', 'W'] : ['T', 'U', 'V', 'W'];
+  if (hqN > 4) {
+    // '본사' 세로 글자 칸(S)의 모양을 Q로, 첫 본사 칸(T)의 모양을 R:S로 옮긴다
+    const clone = <T,>(v: T): T => (v ? JSON.parse(JSON.stringify(v)) : v);
+    for (const r of [28, 29, 30, 31, 32, 33]) {
+      const q = ws.getCell(`Q${r}`);
+      const sCell = ws.getCell(`S${r}`);
+      const t = ws.getCell(`T${r}`);
+      q.style = clone(sCell.style);
+      q.value = sCell.value;
+      sCell.value = null;
+      const rr = ws.getCell(`R${r}`);
+      rr.style = clone(t.style);
+      sCell.style = clone(t.style);
+      if (r >= 29) {
+        try {
+          ws.unMergeCells(`R${r}:S${r}`);
+        } catch {
+          /* 합쳐져 있지 않으면 그대로 */
+        }
+        ws.mergeCells(`R${r}:S${r}`);
+      }
+    }
+  }
+  let si = 0;
+  let hi = 0;
+  return steps.map((st, i) => {
+    const col = site[i] ? siteCols[si++] : hqCols[hi++];
+    if (col) {
+      ws.getCell(`${col}29`).value = boxLabel(st.label);
+      if (!site[i]) ws.getCell(`${col}29`).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+    }
+    return { col: col ?? '', site: site[i], w: col === 'R' ? 64 : col === 'T' ? 50 : 58 };
+  });
+}
 
 const amt = (l: Requisition['lines'][number]) => (l.orderQty || l.reqQty) * (l.orderPrice || 0);
 const n = (v?: number) => (v ? v : null);
@@ -116,17 +152,18 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   addSummarySheet(wb, req, sum);
 
   // 결재란
-  for (const s of req.steps) {
-    const col = SIGN_COL.find((x) => x.test.test(s.label))?.col;
+  const layout = signLayout(ws, req.steps);
+  for (const [i, s] of req.steps.entries()) {
+    const col = layout[i].col;
     if (!col || !s.userName || s.result === 'skipped') continue;
     const state = s.result === 'approved' ? `${md(s.at)} 승인` : s.result === 'rejected' ? '반려' : '';
     // 승인했고 싸인 이미지가 있으면 이름 대신 싸인
     const sign = s.result === 'approved' && s.userId ? signs?.get(s.userId) : undefined;
-    const site = col === 'M' || col === 'O';
+    const site = layout[i].site;
     if (sign) {
       const img = wb.addImage({ base64: sign, extension: 'png' });
       const c0 = col.charCodeAt(0) - 65; // A=0
-      ws.addImage(img, { tl: { col: c0 + 0.1, row: 29.1 }, ext: site ? { width: 70, height: 26 } : { width: col === 'T' ? 50 : 58, height: 24 }, editAs: 'oneCell' });
+      ws.addImage(img, { tl: { col: c0 + 0.1, row: 29.1 }, ext: site ? { width: 70, height: 26 } : { width: layout[i].w, height: 24 }, editAs: 'oneCell' });
       if (site) {
         set(`${col}31`, state);
         ws.getCell(`${col}31`).alignment = { horizontal: 'center', vertical: 'bottom', wrapText: true };
@@ -142,7 +179,10 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     if (site) set(`${col}31`, state ? `${s.userName}\n${state}` : s.userName);
     else {
       set(`${col}31`, s.userName);
+      ws.getCell(`${col}31`).font = { name: '맑은 고딕', size: 8, color: { argb: 'FF000000' } };
       set(`${col}32`, state || null);
+      ws.getCell(`${col}32`).font = { name: '맑은 고딕', size: 7, color: { argb: 'FF000000' } };
+      ws.getCell(`${col}32`).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
     }
     ws.getCell(`${col}31`).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   }
