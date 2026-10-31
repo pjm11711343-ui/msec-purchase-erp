@@ -1158,7 +1158,7 @@ export default function ReqEdit() {
                 <col style={{ width: 40 }} />
                 <col style={{ width: '13%' }} />
                 <col style={{ width: '8%' }} />
-                <col style={{ width: '4%' }} />
+                <col style={{ width: '5.5%' }} />
                 <col style={{ width: '4.5%' }} />
                 <col style={{ width: '5%' }} />
                 <col style={{ width: '4.5%' }} />
@@ -1168,7 +1168,7 @@ export default function ReqEdit() {
                 <col style={{ width: '4.5%' }} />
                 <col style={{ width: '6.5%' }} />
                 <col style={{ width: '6%' }} />
-                <col style={{ width: '7.5%' }} />
+                <col style={{ width: '6%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '7%' }} />
@@ -1332,7 +1332,7 @@ export default function ReqEdit() {
                         )}
                       </td>
                       <td>
-                        {T(l.key, 'unit', l.unit, rowEd, 'w-full', { list: `unit-${l.key}` })}
+                        {T(l.key, 'unit', l.unit, rowEd, 'w-full !px-1 text-center', { list: `unit-${l.key}` })}
                         {rowEd && (
                           <datalist id={`unit-${l.key}`}>
                             {unitOptions(l.itemName, l.spec).map((x) => (

@@ -95,6 +95,10 @@ body {
 .req-tbl .input {
   @apply min-w-0 text-[12px];
 }
+/* 단위 칸: 목록 화살표가 글자를 가리지 않게 (EA·SET 등이 잘리지 않도록) */
+.req-tbl input[list]::-webkit-calendar-picker-indicator {
+  display: none !important;
+}
 
 /* ───────── 폰·태블릿 ───────── */
 /* 손가락으로 누르는 기기: 입력칸·버튼을 조금 크게 */
