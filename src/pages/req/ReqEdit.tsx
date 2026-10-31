@@ -423,14 +423,29 @@ export default function ReqEdit() {
     // 금회청구 수량이 비어 있어도 결재를 올릴 수 있다 (수량은 결재 중 자재부가 발주수량으로 정함)
     const wrong = d.lines.filter(invalidLine);
     if (wrong.length) return toast(`내역·규격 수정 요함 ${wrong.length}줄 (빨간 칸) — 목록에서 품명·규격을 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
-    // 결재자 미지정 칸은 건너뜀
-    const steps: ApprovalStepState[] = d.steps.map((s) => (s.userId ? { label: s.label, userId: s.userId, userName: s.userName } : { label: s.label, result: 'skipped' }));
+    // 현장(현장소장·현장담당)이 작성해 올리면 현장 결재 칸(현장 담당·현장 소장)은 모두 승인 완료로 처리
+    const bySite = profile?.role === 'siteManager' || profile?.role === 'siteStaff';
+    const isSiteStep = (label: string) => /^현장/.test(label.replace(/\s/g, ''));
+    const now = Date.now();
+    const steps: ApprovalStepState[] = d.steps.map((s) => {
+      if (bySite && isSiteStep(s.label))
+        return { label: s.label, ...(s.userId ? { userId: s.userId } : {}), userName: s.userName ?? profile?.name, result: 'approved', comment: `현장 작성 완료 (${profile?.name ?? ''})`, at: now };
+      // 결재자 미지정 칸은 건너뜀
+      return s.userId ? { label: s.label, userId: s.userId, userName: s.userName } : { label: s.label, result: 'skipped' };
+    });
     const first = nextActive(steps, 0);
-    if (first < 0) return toast('결재선에 결재자를 한 명 이상 지정하세요.', 'err');
+    const approverIds = steps.filter((s) => s.userId).map((s) => s.userId!);
+    if (first < 0) {
+      if (!steps.some((s) => s.result === 'approved')) return toast('결재선에 결재자를 한 명 이상 지정하세요.', 'err');
+      // 본사 결재자가 없으면 현장 승인으로 바로 최종 승인
+      return void save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approverIds, submittedAt: now, approvedAt: now }, '결재 요청 (현장 승인 완료)', '현장 결재가 끝나 최종 승인되었습니다.');
+    }
     // 결재 차례가 된 결재자에게 텔레그램 (개인 Chat ID가 있으면)
-    void save({ status: 'pending', steps, currentStep: first, currentApproverId: steps[first].userId, approverIds: steps.filter((s) => s.userId).map((s) => s.userId!), submittedAt: Date.now() }, '결재 요청', '결재를 올렸습니다.').then(
-      (rid) => rid && notifyQuiet('approval_turn', { reqId: rid }),
-    );
+    void save(
+      { status: 'pending', steps, currentStep: first, currentApproverId: steps[first].userId, approverIds, submittedAt: now },
+      bySite && steps.some((s) => isSiteStep(s.label)) ? '결재 요청 (현장 결재 승인 완료)' : '결재 요청',
+      bySite && steps.some((s) => isSiteStep(s.label)) ? `결재를 올렸습니다. 현장 결재는 승인 완료로 처리하고 ${steps[first].label} 차례로 넘겼습니다.` : '결재를 올렸습니다.',
+    ).then((rid) => rid && notifyQuiet('approval_turn', { reqId: rid }));
   };
 
   const decide = (result: 'approved' | 'rejected') => {
@@ -756,7 +771,7 @@ export default function ReqEdit() {
                 발주 결의 저장
               </button>
             )}
-            {d.status === 'pending' && d.createdBy === profile?.id && !d.steps.some((s) => s.result === 'approved' || s.result === 'rejected') && (
+            {d.status === 'pending' && d.createdBy === profile?.id && !d.steps.some((s) => (s.result === 'approved' && !s.comment?.startsWith('현장 작성 완료')) || s.result === 'rejected') && (
               <button className="btn-ghost" disabled={busy} onClick={reopen}>
                 결재 회수
               </button>
