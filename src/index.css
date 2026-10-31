@@ -156,7 +156,7 @@ body {
   .req-tbl thead tr:first-child th:nth-child(2),
   .req-tbl tbody tr:not(.req-total) td:nth-child(2) {
     position: sticky;
-    left: 24px;
+    left: 40px;
     z-index: 3;
     background: #fff;
     box-shadow: 2px 0 0 #c9ced8;

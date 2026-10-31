@@ -63,7 +63,8 @@ export default function ReqEdit() {
   const [comment, setComment] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
-  const [phoneTable, setPhoneTable] = useState(false); // 폰: 기본은 카드, 수정할 때 표
+  const [phoneTable, setPhoneTable] = useState(false);
+  const [drag, setDrag] = useState<{ from: string; over?: string } | null>(null); // 줄 끌어서 옮기기 // 폰: 기본은 카드, 수정할 때 표
   const [priceFor, setPriceFor] = useState<string | null>(null); // 단가 후보 보기 (line key)
   const [newItem, setNewItem] = useState<{ itemName: string; spec: string; unit: string; note: string } | null>(null); // 새 품목 등록·요청
 
@@ -730,6 +731,81 @@ export default function ReqEdit() {
     ) : (
       <span className="tabular-nums">{v ? v.toLocaleString() : ''}</span>
     );
+  /* ───── 줄 순서·빠른 편집 ───── */
+  const moveTo = (key: string, toKey: string) =>
+    setD((x) => {
+      if (!x || key === toKey) return x;
+      const ls = [...x.lines];
+      const from = ls.findIndex((l) => l.key === key);
+      const to = ls.findIndex((l) => l.key === toKey);
+      if (from < 0 || to < 0) return x;
+      const [m] = ls.splice(from, 1);
+      ls.splice(to, 0, m);
+      return { ...x, lines: ls };
+    });
+  const moveBy = (key: string, dir: -1 | 1) => {
+    const i = d.lines.findIndex((l) => l.key === key);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= d.lines.length) return;
+    moveTo(key, d.lines[j].key);
+  };
+  /** 바로 아래에 빈 줄 / 같은 내용 복사 줄 */
+  const insertBelow = (key: string, copy: boolean) =>
+    setD((x) => {
+      if (!x) return x;
+      const i = x.lines.findIndex((l) => l.key === key);
+      const src = x.lines[i];
+      const nl: ReqLine = copy ? { ...src, key: newLine().key, reqQty: 0, orderQty: 0, priorQtyManual: undefined, srcItem: undefined, srcSpec: undefined, aliasHit: undefined } : newLine();
+      const ls = [...x.lines];
+      ls.splice(i + 1, 0, nl);
+      return { ...x, lines: ls };
+    });
+  /** 줄 정렬 (품명·규격 / 자재분류 / 거래선 / 사용 위치) — 빈 줄은 맨 아래 */
+  const sortLines = (by: string) => {
+    if (!by) return;
+    const sz = (sp: string) => {
+      const m = sp.match(/(\d+(?:\.\d+)?)/);
+      return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+    };
+    const catOrder = (id?: string) => {
+      const c = siteCats.find((x) => x.id === id);
+      return c ? c.order : 1e9;
+    };
+    const byItem = (a: ReqLine, b: ReqLine) => a.itemName.localeCompare(b.itemName, 'ko') || sz(a.spec) - sz(b.spec) || a.spec.localeCompare(b.spec, 'ko');
+    const cmp: Record<string, (a: ReqLine, b: ReqLine) => number> = {
+      item: byItem,
+      cat: (a, b) => catOrder(a.siteCategoryId) - catOrder(b.siteCategoryId) || byItem(a, b),
+      vendor: (a, b) => (a.vendorName ?? '힣').localeCompare(b.vendorName ?? '힣', 'ko') || byItem(a, b),
+      location: (a, b) => (a.location ?? '힣').localeCompare(b.location ?? '힣', 'ko') || byItem(a, b),
+    };
+    setD((x) => {
+      if (!x) return x;
+      const filled = x.lines.filter((l) => l.itemName.trim());
+      const empty = x.lines.filter((l) => !l.itemName.trim());
+      return { ...x, lines: [...[...filled].sort(cmp[by]), ...empty] };
+    });
+  };
+  /** 숫자 칸에서 Enter → 아래 줄 같은 칸으로 (수량을 빠르게 입력) */
+  const enterDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+    const el = e.target as HTMLElement;
+    if (!(el instanceof HTMLInputElement) || !el.classList.contains('text-right')) return;
+    const td = el.closest('td');
+    const tr = td?.parentElement as HTMLTableRowElement | null;
+    if (!td || !tr) return;
+    const idx = Array.from(tr.children).indexOf(td);
+    let next = tr.nextElementSibling as HTMLTableRowElement | null;
+    while (next) {
+      const inp = next.children[idx]?.querySelector('input.text-right') as HTMLInputElement | null;
+      if (inp) {
+        e.preventDefault();
+        inp.focus();
+        inp.select();
+        return;
+      }
+      next = next.nextElementSibling as HTMLTableRowElement | null;
+    }
+  };
   const T = (key: string, field: keyof ReqLine, v: string | undefined, on: boolean | undefined, w = 'w-28', extra: object = {}) =>
     on ? <input className={`input h-7 ${w} px-1.5`} value={v ?? ''} onChange={(e) => setLine(key, { [field]: e.target.value } as Partial<ReqLine>)} {...extra} /> : <span>{v}</span>;
 
@@ -995,6 +1071,13 @@ export default function ReqEdit() {
           {prices.error && <span className="text-[12px] text-red-600">단가표를 읽지 못했습니다</span>}
           {editable && (
             <div className="ml-auto flex gap-2">
+              <select className="input h-7 w-28 text-[12px]" value="" title="줄 순서 정렬" onChange={(e) => sortLines(e.target.value)}>
+                <option value="">줄 정렬 ▾</option>
+                <option value="item">품명·규격순</option>
+                <option value="cat">자재분류순</option>
+                <option value="vendor">거래선순</option>
+                <option value="location">사용 위치순</option>
+              </select>
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, newLine()] })}>
                 + 줄 추가
               </button>
@@ -1072,7 +1155,7 @@ export default function ReqEdit() {
           <div className={`req-scroll ${phoneTable ? '' : 'hidden md:block'}`}>
             <table className="tbl req-tbl w-full table-fixed text-[12px]">
               <colgroup>
-                <col style={{ width: 24 }} />
+                <col style={{ width: 40 }} />
                 <col style={{ width: '13%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '4%' }} />
@@ -1091,7 +1174,7 @@ export default function ReqEdit() {
                 <col style={{ width: '7%' }} />
                 <col style={{ width: '4%' }} />
                 {adminMemo.isAdmin && <col style={{ width: '9%' }} />}
-                <col style={{ width: 36 }} />
+                <col style={{ width: editable ? 46 : 36 }} />
               </colgroup>
               <thead className="text-center">
                 <tr>
@@ -1132,7 +1215,7 @@ export default function ReqEdit() {
                   <th className="bg-amber-soft text-center">금 액</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody onKeyDown={enterDown}>
                 {d.lines.map((l, i) => {
                   const pq = priorOf(l);
                   // 이미 발주(선발주)된 줄은 고칠 수 없음
@@ -1141,8 +1224,50 @@ export default function ReqEdit() {
                   const rowOrderEd = orderEditable && !locked;
                   const remain = l.execQty ? l.execQty - pq - l.reqQty : null;
                   return (
-                    <tr key={l.key} className="align-top">
-<td className="pt-2 text-muted">{i + 1}</td>
+                    <tr
+                      key={l.key}
+                      className={`align-top ${drag?.from === l.key ? 'opacity-40' : ''} ${drag && drag.over === l.key && drag.from !== l.key ? 'outline outline-2 -outline-offset-2 outline-amber-brand' : ''}`}
+                      onDragOver={(e) => {
+                        if (!drag) return;
+                        e.preventDefault();
+                        if (drag.over !== l.key) setDrag({ ...drag, over: l.key });
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (drag) moveTo(drag.from, l.key);
+                        setDrag(null);
+                      }}
+                    >
+                      <td className="pt-1 text-muted">
+                        {editable ? (
+                          <div className="flex items-start gap-0.5">
+                            <span
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move';
+                                e.dataTransfer.setData('text/plain', l.key);
+                                setDrag({ from: l.key });
+                              }}
+                              onDragEnd={() => setDrag(null)}
+                              className="cursor-grab select-none pt-1 text-[11px] leading-none active:cursor-grabbing"
+                              title="끌어서 줄 순서 바꾸기"
+                            >
+                              ⋮⋮
+                              <div className="mt-0.5 text-center">{i + 1}</div>
+                            </span>
+                            <div className="flex flex-col">
+                              <button className="h-4 px-0.5 text-[9px] leading-none hover:text-ink disabled:opacity-30" disabled={i === 0} title="위로" aria-label="위로" onClick={() => moveBy(l.key, -1)}>
+                                ▲
+                              </button>
+                              <button className="h-4 px-0.5 text-[9px] leading-none hover:text-ink disabled:opacity-30" disabled={i === d.lines.length - 1} title="아래로" aria-label="아래로" onClick={() => moveBy(l.key, 1)}>
+                                ▼
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="pt-1">{i + 1}</div>
+                        )}
+                      </td>
                       <td>
                         {rowEd ? (
                           <PickInput
@@ -1282,10 +1407,20 @@ export default function ReqEdit() {
                             {ordered.get(`${d.id}|${l.key}`)!.poNo.slice(-9)}
                           </Link>
                         )}
-                        {rowEd && (
-                          <button className="text-muted hover:text-red-600" onClick={() => setD({ ...d, lines: d.lines.filter((x) => x.key !== l.key) })} aria-label="줄 삭제">
-                            ✕
-                          </button>
+                        {editable && (
+                          <div className="flex items-center gap-1">
+                            <button className="text-[11px] text-muted hover:text-ink" title="아래에 빈 줄 넣기" aria-label="아래에 빈 줄 넣기" onClick={() => insertBelow(l.key, false)}>
+                              ＋
+                            </button>
+                            <button className="text-[11px] text-muted hover:text-ink" title="이 줄 복사 (아래에, 수량은 비움)" aria-label="줄 복사" onClick={() => insertBelow(l.key, true)}>
+                              ⧉
+                            </button>
+                            {rowEd && (
+                              <button className="text-muted hover:text-red-600" onClick={() => setD({ ...d, lines: d.lines.filter((x) => x.key !== l.key) })} aria-label="줄 삭제" title="줄 삭제">
+                                ✕
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
