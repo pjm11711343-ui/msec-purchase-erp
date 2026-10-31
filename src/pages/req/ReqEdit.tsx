@@ -64,6 +64,7 @@ export default function ReqEdit() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [phoneTable, setPhoneTable] = useState(false);
+  const [preview, setPreview] = useState(false); // 청구서 미리보기
   const [drag, setDrag] = useState<{ from: string; over?: string } | null>(null); // 줄 끌어서 옮기기 // 폰: 기본은 카드, 수정할 때 표
   const [priceFor, setPriceFor] = useState<string | null>(null); // 단가 후보 보기 (line key)
   const [newItem, setNewItem] = useState<{ itemName: string; spec: string; unit: string; note: string } | null>(null); // 새 품목 등록·요청
@@ -806,6 +807,27 @@ export default function ReqEdit() {
       next = next.nextElementSibling as HTMLTableRowElement | null;
     }
   };
+  /** 긴 글 칸(비고·사용 위치): 한 단계 작은 글씨, 칸을 넘으면 2·3줄로 늘어남 */
+  const TA = (key: string, field: keyof ReqLine, v: string | undefined, on: boolean | undefined, placeholder = '') =>
+    on ? (
+      <textarea
+        rows={1}
+        className="input block h-auto min-h-7 w-full resize-none px-1.5 py-1 !text-[11px] leading-[1.35]"
+        style={{ fieldSizing: 'content' } as React.CSSProperties}
+        placeholder={placeholder}
+        value={v ?? ''}
+        onChange={(e) => setLine(key, { [field]: e.target.value } as Partial<ReqLine>)}
+        onInput={(e) => {
+          const t = e.currentTarget;
+          if (!CSS.supports?.('field-sizing', 'content')) {
+            t.style.height = 'auto';
+            t.style.height = `${t.scrollHeight + 2}px`;
+          }
+        }}
+      />
+    ) : (
+      <span className="block whitespace-pre-wrap break-words text-[11px] leading-[1.35]">{v}</span>
+    );
   const T = (key: string, field: keyof ReqLine, v: string | undefined, on: boolean | undefined, w = 'w-28', extra: object = {}) =>
     on ? <input className={`input h-7 ${w} px-1.5`} value={v ?? ''} onChange={(e) => setLine(key, { [field]: e.target.value } as Partial<ReqLine>)} {...extra} /> : <span>{v}</span>;
 
@@ -819,6 +841,9 @@ export default function ReqEdit() {
             <Link to="/req" className="btn-ghost">
               목록
             </Link>
+            <button className="btn-ghost" onClick={() => setPreview(true)}>
+              미리보기
+            </button>
             {d.id && (
               <button className="btn-ghost" disabled={busy} onClick={downloadForm}>
                 엑셀 다운로드
@@ -1158,7 +1183,7 @@ export default function ReqEdit() {
                 <col style={{ width: 40 }} />
                 <col style={{ width: '13%' }} />
                 <col style={{ width: '8%' }} />
-                <col style={{ width: '5.5%' }} />
+                <col style={{ width: '4.5%' }} />
                 <col style={{ width: '4.5%' }} />
                 <col style={{ width: '5%' }} />
                 <col style={{ width: '4.5%' }} />
@@ -1168,7 +1193,7 @@ export default function ReqEdit() {
                 <col style={{ width: '4.5%' }} />
                 <col style={{ width: '6.5%' }} />
                 <col style={{ width: '6%' }} />
-                <col style={{ width: '6%' }} />
+                <col style={{ width: '7%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '7%' }} />
@@ -1378,9 +1403,9 @@ export default function ReqEdit() {
                           <span className="break-words">{l.vendorName}</span>
                         )}
                       </td>
-                                            <td>{T(l.key, 'remark', l.remark, rowEd, 'w-full')}</td>
+                                            <td>{TA(l.key, 'remark', l.remark, rowEd)}</td>
 <td>
-                        {T(l.key, 'location', l.location, rowEd, 'w-full', { placeholder: '사용 위치·공정' })}
+                        {TA(l.key, 'location', l.location, rowEd, '사용 위치·공정')}
                       </td>
                       <td>
                         {rowEd ? (
@@ -1484,6 +1509,29 @@ export default function ReqEdit() {
       </div>
 
       {d.siteId && <SummaryPanel sum={summary} />}
+      {preview && (
+        <Modal
+          open
+          wide
+          title="구매청구서 미리보기"
+          onClose={() => setPreview(false)}
+          footer={
+            <>
+              <span className="mr-auto self-center text-[12px] text-muted">{d.id ? '엑셀 양식과 같은 순서로 보여줍니다.' : '저장하면 엑셀로 내려받을 수 있습니다.'}</span>
+              {d.id && (
+                <button className="btn-ghost" disabled={busy} onClick={downloadForm}>
+                  엑셀 다운로드
+                </button>
+              )}
+              <button className="btn-dark" onClick={() => setPreview(false)}>
+                닫기
+              </button>
+            </>
+          }
+        >
+          <ReqPreview d={d} priorOf={priorOf} catName={catName} sum={summary} process={d.zoneId ? processLabel(pm.master, d) : ''} signs={signs.byId} />
+        </Modal>
+      )}
       {/* 폰: 결재 버튼을 화면 아래에 고정 */}
       {myTurn && (
         <>
@@ -1737,6 +1785,159 @@ export default function ReqEdit() {
 
 
 /** 하단 요약: 자재분류별 계약·변경(예상)·실행·기반입·금회청구 + 업체별 금회청구 */
+/** 구매청구서 미리보기: 회사 청구서 양식(엑셀)과 같은 칸 순서 */
+function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requisition, 'id'> & { id?: string }; priorOf: (l: ReqLine) => number; catName: (id?: string) => string | undefined; sum: ReqSummary; process: string; signs: Map<string, string> }) {
+  const lines = d.lines.filter((l) => l.itemName.trim());
+  const amt = (l: ReqLine) => lineAmount({ ...l, orderQty: l.orderQty || l.reqQty });
+  const total = lines.reduce((a, l) => a + amt(l), 0);
+  const nf = (v?: number) => (v ? v.toLocaleString() : '');
+  const c = 'border border-[#9aa3b2] px-1 py-0.5';
+  const h = `${c} bg-[#eef1f6] text-center font-semibold`;
+  const locs = [...new Set(lines.map((l) => (l.location ?? '').trim()).filter(Boolean))];
+  const site = d.steps.filter((s) => /^현장/.test(s.label.replace(/\s/g, '')) || /^소장/.test(s.label.replace(/\s/g, '')));
+  const hq = d.steps.filter((s) => !site.includes(s));
+  const box = (s: ApprovalStepState, i: number) => (
+    <div key={i} className="w-[64px] border-r border-[#9aa3b2] text-center last:border-r-0">
+      <div className="border-b border-[#9aa3b2] bg-[#eef1f6] text-[10px]">{s.label.replace(/^(현장|본사)\s*/, '') || s.label}</div>
+      <div className="flex h-10 flex-col items-center justify-center text-[10px]">
+        {s.result === 'approved' && s.userId && signs.get(s.userId) ? <img src={signs.get(s.userId)} alt="" className="h-6 max-w-[58px] object-contain" /> : <span>{s.userName}</span>}
+        {s.result === 'approved' && <span className="text-[9px] text-emerald-700">{s.at ? new Date(s.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : ''} 승인</span>}
+      </div>
+    </div>
+  );
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[980px] bg-white text-[11px] text-black">
+        <div className="relative mb-2 text-center">
+          <div className="text-[20px] font-bold tracking-[0.6em] underline underline-offset-4">구매청구서</div>
+          <div className="absolute right-0 top-0 text-[13px] font-semibold">{d.siteName}</div>
+        </div>
+        <div className="mb-1 flex justify-between text-[12px]">
+          <b>현장명 : {d.siteName} 현장</b>
+          <span>
+            결의번호 : 제 {d.requestDate} - {d.docNo || '　'} 호
+          </span>
+        </div>
+        <table className="w-full table-fixed border-collapse">
+          <colgroup>
+            {[13, 8, 4, 4.5, 5, 4.5, 4.5, 5, 5, 4.5, 6, 6.5, 8, 13].map((w, i) => (
+              <col key={i} style={{ width: `${w}%` }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              <th className={h} rowSpan={2}>품 명</th>
+              <th className={h} rowSpan={2}>규 격</th>
+              <th className={h} rowSpan={2}>단위</th>
+              <th className={h} colSpan={2}>계약내역량</th>
+              <th className={`${h} bg-[#fde2e2]`} rowSpan={2}>실행량</th>
+              <th className={`${h} bg-[#fde2e2]`} colSpan={2}>청구 및 반입 수량</th>
+              <th className={h} rowSpan={2}>본/(비고)</th>
+              <th className={h} colSpan={3}>발주 결의 (본사 작성분)</th>
+              <th className={h} rowSpan={2}>거래선</th>
+              <th className={h} rowSpan={2}>비 고</th>
+            </tr>
+            <tr>
+              <th className={h}>수량</th>
+              <th className={h}>단가</th>
+              <th className={`${h} bg-[#fde2e2]`}>기반입</th>
+              <th className={`${h} bg-[#fde2e2]`}>금회청구</th>
+              <th className={h}>발주수량</th>
+              <th className={h}>단 가</th>
+              <th className={h}>금 액</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className={`${c} font-semibold`} colSpan={12}>
+                {[process, locs.length > 3 ? `${locs.slice(0, 3).join(' · ')} 외` : locs.join(' · ')].filter(Boolean).join(' - ')}
+              </td>
+              <td className={c}></td>
+              <td className={`${c} text-center`}>사용 목적</td>
+            </tr>
+            {lines.map((l, i) => (
+              <tr key={l.key} className="align-top">
+                <td className={`${c} break-words`}>{l.itemName}</td>
+                <td className={`${c} break-words`}>{l.spec}</td>
+                <td className={`${c} text-center`}>{l.unit}</td>
+                <td className={`${c} text-right`}>{nf(l.contractQty)}</td>
+                <td className={`${c} text-right`}>{nf(l.contractPrice)}</td>
+                <td className={`${c} text-right`}>{nf(l.execQty)}</td>
+                <td className={`${c} text-right`}>{nf(priorOf(l))}</td>
+                <td className={`${c} text-right font-semibold`}>{nf(l.reqQty)}</td>
+                <td className={`${c} text-center`}>{[bonText(l), l.note].filter(Boolean).join(' ')}</td>
+                <td className={`${c} text-right`}>{nf(l.orderQty || l.reqQty)}</td>
+                <td className={`${c} text-right`}>{nf(l.orderPrice)}</td>
+                <td className={`${c} text-right`}>{nf(amt(l))}</td>
+                <td className={`${c} break-words`}>{l.vendorName}</td>
+                <td className={`${c} whitespace-pre-wrap break-words text-[10px]`}>
+                  {i === 0 && d.purpose ? <div className="mb-0.5 font-semibold">{d.purpose}</div> : null}
+                  {[l.remark, catName(l.siteCategoryId)].filter(Boolean).join(' / ')}
+                </td>
+              </tr>
+            ))}
+            <tr className="font-semibold">
+              <td className={`${c} text-center`} colSpan={11}>
+                합 계
+              </td>
+              <td className={`${c} text-right`}>{nf(total)}</td>
+              <td className={c} colSpan={2}></td>
+            </tr>
+          </tbody>
+        </table>
+        {sum.rows.some((r) => r.current) && (
+          <table className="mt-2 w-[70%] border-collapse">
+            <thead>
+              <tr>
+                {['자재분류', '계약내역', '변경내역(예상)', '실행금액', '기반입금액', '금회청구'].map((t) => (
+                  <th key={t} className={h}>
+                    {t}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sum.rows
+                .filter((r) => r.current)
+                .map((r) => (
+                  <tr key={r.id}>
+                    <td className={c}>{r.name}</td>
+                    <td className={`${c} text-right`}>{nf(r.contract)}</td>
+                    <td className={`${c} text-right`}>{nf(r.change)}</td>
+                    <td className={`${c} text-right`}>{nf(r.exec)}</td>
+                    <td className={`${c} text-right`}>{nf(r.prior)}</td>
+                    <td className={`${c} text-right font-semibold`}>{nf(r.current)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        )}
+        <div className="mt-3 flex items-end justify-between gap-3">
+          <div className="text-[11.5px]">
+            위와 같이 구매 의뢰 합니다.
+            <div className="mt-1">
+              {d.requestDate} · 합계 <b>{won(total)}원</b>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {[
+              ['현장', site],
+              ['본사', hq],
+            ].map(([t, list]) =>
+              (list as ApprovalStepState[]).length ? (
+                <div key={t as string} className="flex border border-[#9aa3b2]">
+                  <div className="flex w-5 items-center justify-center border-r border-[#9aa3b2] bg-[#eef1f6] text-[10px] font-semibold [writing-mode:vertical-rl]">{t as string}</div>
+                  {(list as ApprovalStepState[]).map(box)}
+                </div>
+              ) : null,
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SummaryPanel({ sum }: { sum: ReqSummary }) {
   const [all, setAll] = useState(false);
   // 자재분류가 지정된 금회청구 줄이 하나도 없으면 전체 분류를 보여준다
