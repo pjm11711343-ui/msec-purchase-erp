@@ -423,8 +423,8 @@ export default function ReqEdit() {
     // 금회청구 수량이 비어 있어도 결재를 올릴 수 있다 (수량은 결재 중 자재부가 발주수량으로 정함)
     const wrong = d.lines.filter(invalidLine);
     if (wrong.length) return toast(`내역·규격 수정 요함 ${wrong.length}줄 (빨간 칸) — 목록에서 품명·규격을 다시 고르세요: ${wrong.slice(0, 3).map((l) => `${l.itemName} ${l.spec}`).join(', ')}`, 'err');
-    // 현장(현장소장·현장담당)이 작성해 올리면 현장 결재 칸(현장 담당·현장 소장)은 모두 승인 완료로 처리
-    const bySite = profile?.role === 'siteManager' || profile?.role === 'siteStaff';
+    // 현장소장·현장담당·자재부·관리자 누가 작성해 올려도 현장 결재 칸(현장 담당·현장 소장)은 모두 승인 완료로 처리
+    const bySite = ['siteManager', 'siteStaff', 'material', 'admin'].includes(profile?.role ?? '');
     const isSiteStep = (label: string) => /^현장/.test(label.replace(/\s/g, ''));
     const now = Date.now();
     const steps: ApprovalStepState[] = d.steps.map((s) => {
