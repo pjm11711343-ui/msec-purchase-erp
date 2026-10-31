@@ -21,6 +21,8 @@ export function StatusChip({ s }: { s: ReqStatus }) {
 
 /** 현장 소장 칸: 승인하면 앞쪽 현장 결재가 끝난 것으로 본다 */
 export const isSiteHead = (label: string) => /소장/.test(label);
+/** 본사 팀장 칸: 본사 담당 승인 전에도 먼저 결재(전결) 가능 */
+export const isTeamLead = (label: string) => /팀장/.test(label);
 /** 대표 칸: 승인하면 문서가 바로 최종 승인 */
 export const isCeo = (label: string) => /대표/.test(label);
 
@@ -30,7 +32,7 @@ export function nextActive(steps: Requisition['steps'], from: number): number {
   return -1;
 }
 
-/** 내가 지금 결재할 수 있는 칸 (-1 = 없음). 내 차례이거나, 뒤쪽 소장·대표 칸이 나라면 전결 */
+/** 내가 지금 결재할 수 있는 칸 (-1 = 없음). 내 차례이거나, 뒤쪽 소장·팀장·대표 칸이 나라면 전결 */
 export function myDecideStep(r: Requisition, uid?: string, isAdmin?: boolean): number {
   if (r.status !== 'pending' || !uid) return -1;
   const cur = r.currentStep;
@@ -38,7 +40,7 @@ export function myDecideStep(r: Requisition, uid?: string, isAdmin?: boolean): n
   if (isAdmin && !r.steps[cur]?.userId) return cur;
   for (let j = cur + 1; j < r.steps.length; j++) {
     const s = r.steps[j];
-    if (s.userId === uid && !s.result && (isSiteHead(s.label) || isCeo(s.label))) return j;
+    if (s.userId === uid && !s.result && (isSiteHead(s.label) || isTeamLead(s.label) || isCeo(s.label))) return j;
   }
   return -1;
 }

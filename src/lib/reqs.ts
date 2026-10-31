@@ -15,7 +15,8 @@ export function execCanSee(r: Requisition, uid?: string): boolean {
   const mine = r.steps.map((s, i) => (s.userId === uid ? i : -1)).filter((i) => i >= 0);
   if (!mine.length) return false;
   if (r.steps.some((s) => s.userId === uid && s.result)) return true; // 이미 결재(승인·반려)한 청구서
-  return r.status === 'pending' && mine.some((i) => i <= r.currentStep);
+  // 본사 팀장 칸은 본사 담당 승인 전에도 먼저 결재할 수 있으므로 결재 중이면 보인다
+  return r.status === 'pending' && mine.some((i) => i <= r.currentStep || /팀장/.test(r.steps[i].label));
 }
 
 export function useRequisitions() {
