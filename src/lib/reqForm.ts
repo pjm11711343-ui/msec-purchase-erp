@@ -103,6 +103,7 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
   // 7행 제목 줄: 공정 이름 + 위쪽 '사용 목적' 칸 (예: "세대외배관(복도) 위생 - 지하주차장 / 1~9동")
   set('B7', [req.processName, req.purpose].filter(Boolean).join(' - ') || null);
+  ws.getCell('B7').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF99' } };
   // T7: 위쪽 '사용 위치·공정' 칸 내용 · T8부터: 품목 줄 비고
   const t7 = usePurposeOf(req);
   set('T7', t7 || null);
@@ -117,11 +118,12 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`G${r}`, n(l.execQty));
     set(`H${r}`, n(l.priorQty));
     set(`I${r}`, n(l.reqQty));
-    // 본/(비고): 프로그램 자재분류를 앞에 → "배관자재 / 3본 (절단)"
+    // 본/(비고): 프로그램 자재분류도 같이
     const cat = l.siteCategoryId ? catNames?.get(l.siteCategoryId) : undefined;
-    const jv = [cat, bonNote(l)].filter(Boolean).join(' / ');
+    //   본수·비고는 윗줄, 자재분류는 아랫줄 (예: "3.0본" ↵ "배관자재")
+    const jv = [bonNote(l), cat].filter(Boolean).join('\n');
     set(`J${r}`, jv || null);
-    if (jv.length > 6) ws.getCell(`J${r}`).alignment = { ...(ws.getCell(`J${r}`).alignment ?? {}), wrapText: true, shrinkToFit: false, vertical: 'middle', horizontal: 'center' };
+    if (jv) ws.getCell(`J${r}`).alignment = { ...(ws.getCell(`J${r}`).alignment ?? {}), wrapText: true, shrinkToFit: false, vertical: 'middle', horizontal: 'center' };
     set(`K${r}`, n(l.orderQty || l.reqQty));
     set(`N${r}`, n(l.orderPrice));
     set(`P${r}`, n(amt(l)));
