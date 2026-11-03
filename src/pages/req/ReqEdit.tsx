@@ -14,6 +14,7 @@ import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
+import ReqImportModal from './ReqImportModal';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
 import { itemKey, makeItemStd, pickListPrice, priceValid, siteCatOfStd, useItemCats, useItemEntries, usePriceList } from '../../lib/itemMaster';
 import { normItem, normSpec } from '../../lib/itemNorm';
@@ -62,6 +63,7 @@ export default function ReqEdit() {
   const [busy, setBusy] = useState(false);
   const [comment, setComment] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [phoneTable, setPhoneTable] = useState(false);
   const [preview, setPreview] = useState(false); // 청구서 미리보기
@@ -760,6 +762,28 @@ export default function ReqEdit() {
     if (rows.length > 1 || skip) toast(`${ok}칸 붙여넣었습니다.${skip ? ` 목록에 없는 ${skip}칸은 건너뛰었습니다 (빨간 칸이 없게 목록 값으로 붙여넣으세요).` : ''}`, skip ? 'err' : undefined);
   };
 
+  /** 기존 청구서 불러오기: 고른 줄을 지금 청구서 아래에 추가 (수량은 비우고, 단가·자재분류는 이 현장 기준으로 다시 자동) */
+  const addFromReq = (src: ReqLine[], from: Requisition) => {
+    const same = from.siteId === d.siteId;
+    const add: ReqLine[] = src.map((l) => ({
+      ...newLine(),
+      itemName: l.itemName,
+      spec: l.spec,
+      unit: l.unit,
+      note: l.note,
+      remark: l.remark,
+      vendorId: l.vendorId,
+      vendorName: l.vendorName,
+      // 자재분류는 현장마다 달라서 같은 현장일 때만 그대로
+      ...(same && l.siteCategoryId ? { siteCategoryId: l.siteCategoryId, catAuto: l.catAuto } : {}),
+      ...(same ? { contractQty: l.contractQty || 0, contractPrice: l.contractPrice || 0, execQty: l.execQty || 0 } : {}),
+    }));
+    setD((x) => x && { ...x, lines: [...x.lines.filter((l) => l.itemName.trim()), ...add] });
+    add.forEach((l) => autoPrice(l.key));
+    setImportOpen(false);
+    toast(`${from.siteName} ${from.docNo || from.requestDate} 청구서에서 ${add.length}줄을 불러왔습니다. 금회청구 수량을 넣어 주세요.`);
+  };
+
   /** 회사 청구서 양식(엑셀)으로 내려받기 */
   const downloadForm = async () => {
     try {
@@ -1181,6 +1205,9 @@ export default function ReqEdit() {
               </select>
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, newLine()] })}>
                 + 줄 추가
+              </button>
+              <button className="btn-ghost h-7 text-[12px]" title="예전에 쓴 청구서의 품목 줄을 골라 아래에 추가" onClick={() => setImportOpen(true)}>
+                기존 청구서 불러오기
               </button>
               <button className="btn-ghost h-7 text-[12px]" title="품명·규격 목록에 없는 품목" onClick={() => setNewItem({ itemName: '', spec: '', unit: '', note: '' })}>
                 {isOffice ? '+ 새 품목 등록' : '+ 새 품목 요청'}
@@ -1681,6 +1708,7 @@ export default function ReqEdit() {
         </div>
       )}
 
+      {importOpen && <ReqImportModal reqs={reqs.data} sites={sites.data} siteId={d.siteId} currentId={d.id} onAdd={addFromReq} onClose={() => setImportOpen(false)} />}
       <Modal
         open={pasteOpen}
         title="엑셀 붙여넣기"
