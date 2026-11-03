@@ -239,6 +239,16 @@ export interface ApprovalStepState {
   at?: number;
 }
 
+/** 구매청구서 하단 결재자 의견·지시사항 */
+export interface ReqOpinion {
+  at: number;
+  byId?: string;
+  by: string;
+  label: string; // 결재 칸 (예: 본사 대표이사)
+  result: 'approved' | 'rejected';
+  text: string;
+}
+
 export interface Requisition {
   id: string;
   siteId: string;
@@ -265,6 +275,7 @@ export interface Requisition {
   submittedAt?: number;
   approvedAt?: number;
   history: { at: number; by: string; action: string; comment?: string }[];
+  opinions?: ReqOpinion[]; // 결재자 의견 및 지시사항 (결재 차례에 작성, 회수·재상신해도 남음)
   deletedAt?: number; // 휴지통으로 옮긴 시각 (있으면 목록·집계에서 빠짐)
   deletedBy?: string;
   deletedByName?: string;

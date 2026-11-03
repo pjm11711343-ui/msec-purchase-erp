@@ -6,6 +6,7 @@
 //  receipt       입고 등록 → 현장 단톡방                                    (업체·사내)
 //  approval_turn 청구서 결재 차례 → 결재자 개인 텔레그램                      (사내)
 //  delivery_plan 업체 납품 일정 → 현장 단톡방 + 자재부 텔레그램              (업체·자재부)
+//  approval_opinion 결재자 의견·지시 → 청구서 작성자 + 현장 단톡방                (사내)
 //  rfq_sent      견적 의뢰 → 업체 메일(의뢰서 PDF·포털 링크)                 (자재부·관리자)
 import { esc, fail, getDoc, HttpError, sendMail, sendTelegram, verifyUser, type Res } from './_lib/common.js';
 
@@ -137,6 +138,21 @@ export default async function handler(req: Req, res: Res) {
       const tSite = await sendTelegram(s?.telegramChatId, msg);
       const tOffice = await sendTelegram(process.env.TELEGRAM_OFFICE_CHAT_ID, msg);
       return res.status(200).json({ ok: true, telegram: tSite, office: tOffice });
+    }
+
+    if (event === 'approval_opinion') {
+      if (!staff) throw new HttpError(403, '사내 사용자만 보낼 수 있습니다.');
+      const id = String(body.reqId ?? '');
+      const r = id && (await getDoc<{ siteId: string; siteName: string; docNo?: string; requestDate: string; createdBy: string; status: string; opinions?: { by: string; label: string; result: string; text: string }[] }>(me.token, `erp_requisitions/${id}`));
+      if (!r) throw new HttpError(404, '청구서를 찾을 수 없습니다.');
+      const o = r.opinions?.at(-1);
+      if (!o) return res.status(200).json({ ok: true, telegram: 'skipped' });
+      const msg = `💬 <b>결재자 ${o.result === 'rejected' ? '반려 의견' : '의견·지시'}</b> ${esc(r.siteName)}\n구매청구서 ${esc(r.docNo || r.requestDate)}\n${esc(o.label)} ${esc(o.by)} (${o.result === 'rejected' ? '반려' : '승인'})\n\n${esc(o.text)}\n\n${origin}/req/${id}`;
+      const author = await getDoc<{ telegramChatId?: string }>(me.token, `erp_users/${r.createdBy}`);
+      const s = await site(r.siteId);
+      const tAuthor = await sendTelegram(author?.telegramChatId, msg);
+      const tSite = s?.telegramChatId && s.telegramChatId !== author?.telegramChatId ? await sendTelegram(s.telegramChatId, msg) : 'skipped';
+      return res.status(200).json({ ok: true, telegram: tAuthor, site: tSite });
     }
 
     if (event === 'approval_turn') {

@@ -467,12 +467,20 @@ export default function ReqEdit() {
       if (i < j || ceo) return s.userId ? { ...s, result: 'approved', comment: `${me.label} 전결`, at: now } : { ...s, result: 'skipped' };
       return s;
     });
-    if (result === 'rejected') return save({ status: 'rejected', steps, currentApproverId: undefined }, '반려', '반려했습니다.');
+    // 결재자 의견·지시사항: 하단 칸에 쌓이고 작성자·현장에 텔레그램
+    const text = comment.trim();
+    const opinions = text ? [...(d.opinions ?? []), { at: now, byId: profile?.id, by: profile?.name ?? '', label: me.label, result, text }] : d.opinions;
+    const tellOpinion = (rid: string | void) => {
+      if (rid && text) notifyQuiet('approval_opinion', { reqId: rid });
+    };
+    if (result === 'rejected') return void save({ status: 'rejected', steps, currentApproverId: undefined, opinions }, '반려', '반려했습니다.').then(tellOpinion);
     const next = ceo ? -1 : nextActive(steps, j + 1);
-    if (next < 0) return save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.');
-    void save({ steps, currentStep: next, currentApproverId: steps[next].userId }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.').then(
-      (rid) => rid && notifyQuiet('approval_turn', { reqId: rid }),
-    );
+    if (next < 0)
+      return void save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now, opinions }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.').then(tellOpinion);
+    void save({ steps, currentStep: next, currentApproverId: steps[next].userId, opinions }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.').then((rid) => {
+      if (rid) notifyQuiet('approval_turn', { reqId: rid });
+      tellOpinion(rid);
+    });
   };
 
   /** 결재 중 수정 저장: 결재 진행은 그대로 두고, 바뀐 내용을 진행 기록에 남긴다 */
@@ -1060,7 +1068,7 @@ export default function ReqEdit() {
           </div>
           {myTurn && (
             <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
-              <input className="input" placeholder="의견 (반려 시 필수)" value={comment} onChange={(e) => setComment(e.target.value)} />
+              <input className="input" placeholder="의견·지시사항 (반려 시 필수, 길게 쓰려면 아래 칸)" value={comment} onChange={(e) => setComment(e.target.value)} />
               <div className="flex gap-2">
                 <button className="btn-primary flex-1" disabled={busy} onClick={() => decide('approved')}>
                   {(() => {
@@ -1548,6 +1556,48 @@ export default function ReqEdit() {
             </div>
           </div>
         </>
+      )}
+
+      {(myTurn || (d.opinions?.length ?? 0) > 0) && (
+        <div className="card mt-4 px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-semibold">결재자 의견 및 지시사항</span>
+            <span className="text-[11.5px] text-muted">결재자가 자기 결재 차례에 씁니다. 사내 사용자 모두 볼 수 있고, 작성자·현장에 텔레그램으로 알립니다.</span>
+          </div>
+          {(d.opinions ?? []).length > 0 && (
+            <div className="mb-2 divide-y divide-line rounded-md border border-line">
+              {(d.opinions ?? []).map((o, i) => (
+                <div key={i} className="px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                    <span className="font-semibold text-ink">{o.by}</span>
+                    <span className="text-muted">{o.label}</span>
+                    <span className={`chip ${o.result === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{o.result === 'approved' ? '승인' : '반려'}</span>
+                    <span className="ml-auto text-muted">{new Date(o.at).toLocaleString('ko-KR')}</span>
+                  </div>
+                  <div className="mt-1 whitespace-pre-wrap text-[13px]">{o.text}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {myTurn && (
+            <div className="no-print">
+              <textarea
+                className="input min-h-[84px] w-full py-2 text-[13px]"
+                placeholder="의견·지시사항을 적고 위(또는 아래)의 승인·반려를 누르세요. 반려할 때는 반려 사유를 꼭 적어 주세요."
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <div className="mt-2 hidden gap-2 md:flex">
+                <button className="btn-primary" disabled={busy} onClick={() => decide('approved')}>
+                  의견 남기고 승인
+                </button>
+                <button className="btn-danger" disabled={busy} onClick={() => decide('rejected')}>
+                  의견 남기고 반려
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {d.history.length > 0 && (
