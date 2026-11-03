@@ -129,6 +129,15 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`P${r}`, n(amt(l)));
     ws.getCell(`P${r}`).font = plain;
     set(`R${r}`, l.vendorName || null);
+    // 거래선(R:S 합친 칸): 업체명이 길면 칸 안에서 자동 줄바꿈
+    if (l.vendorName) {
+      const rc = ws.getCell(`R${r}`);
+      rc.style = JSON.parse(JSON.stringify(rc.style ?? {})); // 양식 칸끼리 같은 서식을 나눠 써서, 이 칸만 바꾸려면 복사
+      rc.alignment = { ...(rc.alignment ?? {}), wrapText: true, shrinkToFit: false, vertical: 'middle', horizontal: 'center' };
+      // 줄 높이(27pt) 안에 들어가게: 길면 글씨를 한두 단계 작게 (2줄 → 7pt, 3줄 → 6pt)
+      const len = l.vendorName.length;
+      if (len > 7) rc.font = { ...(rc.font ?? {}), size: len > 12 ? 6 : 7 };
+    }
     set(`T${r}`, l.remark || null);
   });
 
