@@ -59,8 +59,11 @@ service cloud.firestore {
       allow write: if isOffice();
     }
     match /erp_vendors/{id} {
-      allow read: if isErp();
+      allow read: if isErp() || (isVendor() && id == myVendor());
       allow write: if isOffice();
+      // 업체는 자기 업체의 연락처·주소 등만 고칠 수 있다 (업체명·사용 여부·다른 표기는 자재부만)
+      allow update: if isVendor() && id == myVendor()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['contactName', 'phone', 'mobile', 'email', 'fax', 'address', 'bizNo', 'ceoName', 'vendorNote', 'vendorUpdatedAt']);
     }
     match /erp_standardCategories/{id} {
       allow read: if isErp();

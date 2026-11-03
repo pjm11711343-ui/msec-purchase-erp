@@ -9,6 +9,7 @@ import { poProgress, receivedMap, useReceipts, useVendorPOs } from '../../lib/re
 import ReceiptPanel from '../../components/ReceiptPanel';
 import VendorStatement from './VendorStatement';
 import VendorRfq from './VendorRfq';
+import VendorInfo from './VendorInfo';
 import { useVendorRfqs } from '../../lib/rfq';
 import { Empty, errMsg, RateBar, useToast } from '../../components/ui';
 import { MIN_ROWS, PoSheet, signBoxes } from '../po/PoDetail';
@@ -25,7 +26,7 @@ export default function VendorPortal() {
   const [view, setView] = useState<'receipt' | 'sheet'>('receipt');
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const [siteF, setSiteF] = useState(''); // 현장별 보기 ('' = 전체, 현장별로 묶어서)
-  const [page, setPage] = useState<'po' | 'statement' | 'rfq'>('po');
+  const [page, setPage] = useState<'po' | 'statement' | 'rfq' | 'info'>('po');
   const vr = useVendorRfqs(vendor?.vendorId);
   const newRfq = vr.rfqs.data.filter((r) => r.status === 'sent' && !vr.quotes.data.some((q) => q.rfqId === r.id && q.status === 'submitted')).length;
   const rec = useMemo(() => receivedMap(receipts.data), [receipts.data]);
@@ -82,10 +83,10 @@ export default function VendorPortal() {
         </button>
       </header>
       <div className="mx-auto max-w-[1280px] p-2.5 sm:p-5">
-        <div className="no-print mb-4 grid grid-cols-3 gap-1 sm:flex">
-          {(['po', 'statement', 'rfq'] as const).map((t) => (
+        <div className="no-print mb-4 grid grid-cols-2 gap-1 sm:flex">
+          {(['po', 'statement', 'rfq', 'info'] as const).map((t) => (
             <button key={t} className={`rounded-md px-4 py-1.5 text-[13px] font-semibold ${page === t ? 'bg-navy-950 text-white' : 'bg-white text-muted hover:text-ink'}`} onClick={() => (setPage(t), setOpen(null))}>
-              {t === 'po' ? '발주서 · 입고' : t === 'statement' ? '거래명세서' : '견적 요청'}
+              {t === 'po' ? '발주서 · 입고' : t === 'statement' ? '거래명세서' : t === 'rfq' ? '견적 요청' : '업체 정보'}
               {t === 'rfq' && newRfq > 0 && <span className="ml-1.5 rounded-full bg-amber-brand px-1.5 text-[11px] text-navy-950">{newRfq}</span>}
             </button>
           ))}
@@ -94,6 +95,8 @@ export default function VendorPortal() {
           <VendorStatement />
         ) : page === 'rfq' ? (
           <VendorRfq />
+        ) : page === 'info' ? (
+          <VendorInfo />
         ) : !cur ? (
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">

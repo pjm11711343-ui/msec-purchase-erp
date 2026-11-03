@@ -53,9 +53,19 @@ export interface Vendor {
   phone?: string;
   email?: string;
   contactName?: string;
+  mobile?: string; // 담당자 휴대폰
+  fax?: string;
+  address?: string;
+  bizNo?: string; // 사업자등록번호
+  ceoName?: string; // 대표자
+  vendorNote?: string; // 업체가 남긴 안내 (납품 가능 시간 등)
+  vendorUpdatedAt?: number; // 업체가 포털에서 정보를 고친 시각
   accessCodeHash?: string; // 업체 포털(4단계)용
   active: boolean;
 }
+
+/** 업체가 포털에서 직접 고칠 수 있는 정보 */
+export const VENDOR_SELF_FIELDS = ['contactName', 'phone', 'mobile', 'email', 'fax', 'address', 'bizNo', 'ceoName', 'vendorNote'] as const;
 
 export interface StandardCategory {
   id: string;

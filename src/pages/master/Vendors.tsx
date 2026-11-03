@@ -51,6 +51,9 @@ export default function Vendors() {
     phone: String(d.phone ?? '').trim() || undefined,
     email: String(d.email ?? '').trim() || undefined,
     contactName: String(d.contactName ?? '').trim() || undefined,
+    mobile: String(d.mobile ?? '').trim() || undefined,
+    address: String(d.address ?? '').trim() || undefined,
+    bizNo: String(d.bizNo ?? '').trim() || undefined,
     aliases: toList(d.aliases),
     active: prev?.active ?? true,
   });
@@ -77,7 +80,21 @@ export default function Vendors() {
           { key: 'name', label: '업체명', render: (v) => <span className="font-medium">{v.name}</span> },
           { key: 'phone', label: '전화' },
           { key: 'email', label: '이메일' },
-          { key: 'contactName', label: '담당자' },
+          {
+            key: 'contactName',
+            label: '담당자',
+            render: (v) => (
+              <span>
+                {v.contactName}
+                {v.mobile && <span className="ml-1 text-[11.5px] text-muted">{v.mobile}</span>}
+                {v.vendorUpdatedAt && (
+                  <span className="chip ml-1 bg-sky-50 text-sky-700" title={`업체가 포털에서 정보 수정 ${new Date(v.vendorUpdatedAt).toLocaleString('ko-KR')}${v.vendorNote ? `\n안내: ${v.vendorNote}` : ''}`}>
+                    업체 수정
+                  </span>
+                )}
+              </span>
+            ),
+          },
           { key: 'aliases', label: '다른 표기', render: (v) => <span className="text-[11.5px] text-muted">{(v.aliases ?? []).join(', ')}</span> },
           { key: 'active', label: '상태', render: (v) => (v.active ? '사용' : '중지') },
           {
@@ -135,6 +152,9 @@ export default function Vendors() {
           { key: 'phone', label: '전화' },
           { key: 'email', label: '이메일' },
           { key: 'contactName', label: '담당자' },
+          { key: 'mobile', label: '담당자 휴대폰' },
+          { key: 'bizNo', label: '사업자등록번호' },
+          { key: 'address', label: '주소' },
           { key: 'aliases', label: '다른 표기 (쉼표로 구분)', type: 'list', hint: '청구서 시트 이름, 계산서 표기 등' },
         ]}
         onSave={async (id, d) => {
