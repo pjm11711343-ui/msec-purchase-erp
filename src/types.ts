@@ -255,7 +255,8 @@ export interface Requisition {
   siteName: string;
   docNo: string; // 결의번호 (직접 입력)
   requestDate: string; // YYYY-MM-DD
-  purpose?: string; // 사용 목적
+  purpose?: string; // 사용 위치·공정 (화면 위쪽 칸, 예전 이름 '사용 목적')
+  usePurpose?: string; // 사용 목적 (청구서 1칸, 엑셀 T8). 없으면 줄별 사용 위치(예전 자료)를 모아 보여줌
   zoneId?: string; // 공정: 구역 (청구서 1장 = 공정 1칸)
   tradeId?: string; // 공정: 공종
   zoneSub?: string; // 구역 안 세부 위치 (예: 세대외배관 → 복도)

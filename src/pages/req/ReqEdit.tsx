@@ -4,7 +4,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { useSiteCategories, useSites, useStandardCategories, useVendors } from '../../lib/hooks';
-import { fillReqForm } from '../../lib/reqForm';
+import { fillReqForm, usePurposeOf } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
@@ -503,6 +503,7 @@ export default function ReqEdit() {
     if (removed.length) parts.push(`삭제 ${removed.length}줄(${removed.slice(0, 3).map(nm).join(', ')}${removed.length > 3 ? ' …' : ''})`);
     if (changed.length) parts.push(`변경 ${changed.length}줄(${changed.slice(0, 3).map(nm).join(', ')}${changed.length > 3 ? ' …' : ''})`);
     if (before && (before.purpose ?? '') !== (d.purpose ?? '')) parts.push('사용 위치·공정');
+    if (before && usePurposeOf(before) !== usePurposeOf(d)) parts.push('사용 목적');
     if (before && (before.docNo !== d.docNo || before.requestDate !== d.requestDate)) parts.push('결의번호·청구일');
     const summary = parts.join(' · ');
     save({}, summary ? `결재 중 수정: ${summary}` : '결재 중 저장', '수정 내용을 저장했습니다. 결재는 그대로 진행됩니다.');
@@ -642,7 +643,7 @@ export default function ReqEdit() {
       } else if (many) siteMsg = ` "${p.siteLabel}"에 맞는 현장이 여러 개입니다(${many.map((s) => s.name).join(', ')}). 현장을 직접 고르세요.`;
       else if (!site && p.siteLabel) siteMsg = ` 청구서 현장명 "${p.siteLabel}"과 맞는 현장을 찾지 못했습니다. 현장을 직접 고르세요.`;
       const rec = addFromRows(p.lines);
-      setD((x) => x && { ...x, purpose: x.purpose || p.purpose, requestDate: x.requestDate || p.docDate || today() });
+      setD((x) => x && { ...x, usePurpose: x.usePurpose || p.purpose || undefined, requestDate: x.requestDate || p.docDate || today() });
       const recMsg = (rec.auto ? ` 다른 표기 ${rec.auto}줄은 기준 품명·규격으로 자동 인식했습니다.` : '') + (rec.fix ? ` ${rec.fix}줄은 품명·규격을 알아보지 못했습니다 — "내역·규격 수정 요함" 줄을 고쳐 주세요.` : '');
       toast(`${p.lines.length}줄을 가져왔습니다.${recMsg}${siteMsg}`, rec.fix || (!site && p.siteLabel) ? 'err' : undefined);
     } catch (e) {
@@ -1055,6 +1056,11 @@ export default function ReqEdit() {
               <input className="input" placeholder="예: 지하주차장 위생배관 / 1~9동" value={d.purpose ?? ''} disabled={!editable} onChange={(e) => setD({ ...d, purpose: e.target.value })} />
             </Field>
           </div>
+          <div className="col-span-2 md:col-span-4">
+            <Field label="사용 목적">
+              <input className="input" placeholder="예: 101~102동 PIT 배관 부족분" value={usePurposeOf(d)} disabled={!editable} onChange={(e) => setD({ ...d, usePurpose: e.target.value })} />
+            </Field>
+          </div>
         </div>
 
         <div className="card p-4">
@@ -1156,7 +1162,6 @@ export default function ReqEdit() {
                 <option value="item">품명·규격순</option>
                 <option value="cat">자재분류순</option>
                 <option value="vendor">거래선순</option>
-                <option value="location">사용 위치순</option>
               </select>
               <button className="btn-ghost h-7 text-[12px]" onClick={() => setD({ ...d, lines: [...d.lines, newLine()] })}>
                 + 줄 추가
@@ -1249,8 +1254,7 @@ export default function ReqEdit() {
                 <col style={{ width: '6.5%' }} />
                 <col style={{ width: '6%' }} />
                 <col style={{ width: '7%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '8%' }} />
+                <col style={{ width: '13%' }} />
                 <col style={{ width: '7%' }} />
                 <col style={{ width: '4%' }} />
                 {adminMemo.isAdmin && <col style={{ width: '9%' }} />}
@@ -1269,7 +1273,6 @@ export default function ReqEdit() {
                   <th colSpan={3} className="bg-amber-soft text-center">발주 결의 (본사 작성분)</th>
                   <th rowSpan={2} className="bg-amber-soft text-center">거래선</th>
                   <th rowSpan={2} className="text-center">비 고</th>
-                  <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">사용 위치·공정</th>
                   <th rowSpan={2} className="bg-[#eef1f6] text-center">자재분류</th>
                   <th rowSpan={2} className="bg-[#eef1f6] text-center leading-tight">
                     실행
@@ -1462,9 +1465,6 @@ export default function ReqEdit() {
                         )}
                       </td>
                                             <td>{TA(l.key, 'remark', l.remark, rowEd)}</td>
-<td>
-                        {TA(l.key, 'location', l.location, rowEd, '사용 위치·공정')}
-                      </td>
                       <td>
                         {rowEd ? (
                           <PickInput
@@ -1688,7 +1688,7 @@ export default function ReqEdit() {
         }
       >
         <p className="mb-2 text-muted">엑셀에서 아래 순서로 열을 복사해 붙여넣으세요 (머리글 제외).</p>
-        <div className="mb-2 rounded-md bg-canvas px-3 py-2 font-mono text-[12px]">품명 ⇥ 규격 ⇥ 단위 ⇥ 금회청구 ⇥ 비고 ⇥ 사용 위치·공정</div>
+        <div className="mb-2 rounded-md bg-canvas px-3 py-2 font-mono text-[12px]">품명 ⇥ 규격 ⇥ 단위 ⇥ 금회청구 ⇥ 비고 ⇥ 사용 목적(위치)</div>
         <textarea className="input h-48 w-full py-2 font-mono text-[12px]" value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
       </Modal>
 
@@ -1894,7 +1894,6 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
   const nf = (v?: number) => (v ? v.toLocaleString() : '');
   const c = 'border border-[#9aa3b2] px-1 py-0.5';
   const h = `${c} bg-[#eef1f6] text-center font-semibold`;
-  const locs = [...new Set(lines.map((l) => (l.location ?? '').trim()).filter(Boolean))];
   const site = d.steps.filter((s) => /^현장/.test(s.label.replace(/\s/g, '')) || /^소장/.test(s.label.replace(/\s/g, '')));
   const hq = d.steps.filter((s) => !site.includes(s));
   const box = (s: ApprovalStepState, i: number) => (
@@ -1972,7 +1971,7 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
                 <td className={`${c} text-right`}>{nf(amt(l))}</td>
                 <td className={`${c} break-words`}>{l.vendorName}</td>
                 <td className={`${c} whitespace-pre-wrap break-words text-[10px]`}>
-                  {i === 0 && locs.length ? <div className="mb-0.5 font-semibold">{locs.join(' · ')}</div> : null}
+                  {i === 0 && usePurposeOf(d) ? <div className="mb-0.5 font-semibold">{usePurposeOf(d)}</div> : null}
                   {[l.remark, catName(l.siteCategoryId)].filter(Boolean).join(' / ')}
                 </td>
               </tr>

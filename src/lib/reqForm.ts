@@ -15,6 +15,12 @@ import { boxLabel, isSiteStepLabel } from './approvalTemplates';
 import { NO_VENDOR, type ReqSummary, type SumRow } from './reqSummary';
 
 // 7행은 사용 위치·공정 제목 줄 → 품목은 8~20행(1쪽 13줄), 이어서 35~188행
+/** 청구서 '사용 목적': 직접 쓴 값, 없으면 예전 줄별 '사용 위치·공정'을 모아서 */
+export function usePurposeOf(r: Pick<Requisition, 'usePurpose' | 'lines'>) {
+  if (r.usePurpose != null) return r.usePurpose;
+  return [...new Set(r.lines.map((l) => (l.location ?? '').trim()).filter(Boolean))].join(' · ');
+}
+
 /** 이어지는 쪽(35행~) 한 쪽에 들어가는 품목 줄 수 (A4 가로·73% 기준, 1~6행 제목 반복 포함) */
 export const PAGE_ROWS = 23;
 export const ITEM_ROWS = [...Array.from({ length: 13 }, (_, i) => 8 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
@@ -97,11 +103,10 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
   // 7행 제목 줄: 공정 이름 + 위쪽 '사용 위치·공정' 칸 (예: "세대외배관(복도) 위생 - 지하주차장 / 1~9동")
   set('B7', [req.processName, req.purpose].filter(Boolean).join(' - ') || null);
-  // T7 '사용 목적' 제목 아래(T8)에 이 청구서 줄들의 사용 위치·공정
-  const locs = [...new Set(lines.map((l) => (l.location ?? '').trim()).filter(Boolean))];
+  // T7 '사용 목적' 제목 아래(T8)에 청구서의 사용 목적
   set('T7', '사용 목적');
   // T8은 첫 품목 줄의 비고 칸이기도 해서 첫 줄 비고는 아래 줄에 이어 적는다
-  const t8 = [locs.join(' · '), lines[0]?.remark?.trim()].filter(Boolean).join('\n');
+  const t8 = [usePurposeOf(req), lines[0]?.remark?.trim()].filter(Boolean).join('\n');
   set('T8', t8 || null);
   if (t8) ws.getCell('T8').alignment = { ...(ws.getCell('T8').alignment ?? {}), wrapText: true, vertical: 'middle' };
   lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
