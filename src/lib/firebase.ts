@@ -76,6 +76,7 @@ export const C = {
   itemCats: 'erp_itemCats',
   rfqs: 'erp_rfqs', // 견적 의뢰서
   rfqQuotes: 'erp_rfqQuotes', // 업체 견적 (id = 의뢰서id_업체id)
+  hhRates: 'erp_hhRates', // 현장별 세대당 수량 (id = siteId)
   notices: 'erp_notices', // 업체 공지사항
   noticeReads: 'erp_noticeReads', // 업체 공지 읽음 (id = 공지id_업체id)
   adminMemos: 'erp_adminMemos', // 관리자 전용 줄 메모 (id = 청구서id_줄key)

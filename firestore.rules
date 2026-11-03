@@ -175,6 +175,11 @@ service cloud.firestore {
       allow read: if canRead(siteId);
       allow write: if isOffice();
     }
+    // 현장별 세대당 수량 (세대수 × 세대당 수량 = 금회청구)
+    match /erp_hhRates/{siteId} {
+      allow read: if canRead(siteId);
+      allow write: if isOffice();
+    }
     match /erp_baseSheets/{id} {
       allow read: if canRead(resource.data.siteId);
       allow write: if isOffice();

@@ -15,6 +15,8 @@ import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import ReqImportModal from './ReqImportModal';
+import HhRatesEditor from '../../components/HhRatesEditor';
+import { hhPerOf, hhRuleFor, isHhLine, useHhRates } from '../../lib/hh';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
 import { itemKey, makeItemStd, pickListPrice, priceValid, siteCatOfStd, useItemCats, useItemEntries, usePriceList } from '../../lib/itemMaster';
 import { normItem, normSpec } from '../../lib/itemNorm';
@@ -127,6 +129,8 @@ export default function ReqEdit() {
   // 공정(구역 × 공종): 청구서 1장 = 공정 1칸. 기반입·잔여는 같은 공정끼리
   const pm = useProcessMaster();
   const sproc = useSiteProcess(d?.siteId);
+  const hh = useHhRates(d?.siteId);
+  const [hhOpen, setHhOpen] = useState(false);
   const baseSheets = useBaseSheets(d?.siteId);
   const procCells = sproc.data?.cells ?? defaultCells(pm.master);
   const baseSheet = d?.zoneId ? baseSheets.data.find((s) => s.zoneId === d.zoneId && s.tradeId === d.tradeId) : undefined;
@@ -335,7 +339,11 @@ export default function ReqEdit() {
     }
   };
   /** 품명·규격은 목록에서 고른 값만. 바꾸면 자동 단가는 다시 찾는다 */
-  const resetAuto = (l: ReqLine): Partial<ReqLine> => (l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {});
+  const resetAuto = (l: ReqLine): Partial<ReqLine> => ({
+    ...(l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {}),
+    // 품명·규격이 바뀌면 세대 청구 값도 다시
+    ...(l.hhCount != null ? { hhCount: undefined, hhType: undefined, hhPer: undefined, hhUnit: undefined } : {}),
+  });
   const pickItem = (key: string, v: string) => {
     const l = d.lines.find((x) => x.key === key);
     if (!l || v === l.itemName) return;
@@ -760,6 +768,18 @@ export default function ReqEdit() {
     setD((x) => x && { ...x, lines });
     touched.forEach((k) => autoPrice(k));
     if (rows.length > 1 || skip) toast(`${ok}칸 붙여넣었습니다.${skip ? ` 목록에 없는 ${skip}칸은 건너뛰었습니다 (빨간 칸이 없게 목록 값으로 붙여넣으세요).` : ''}`, skip ? 'err' : undefined);
+  };
+
+  /** 세대 청구: 세대수·타입 → 금회청구 = 세대수 × 세대당 수량 (발주수량도 같이) */
+  const setHh = (key: string, patch: { hhCount?: number; hhType?: string }) => {
+    const l = d.lines.find((x) => x.key === key);
+    const rule = l && hhRuleFor(hh.data, l.itemName, l.spec);
+    if (!l || !rule) return;
+    const count = patch.hhCount ?? l.hhCount ?? 0;
+    const type = rule.byType ? (patch.hhType ?? l.hhType ?? hh.data?.types.find((t) => (rule.perType?.[t] ?? 0) > 0)) : undefined;
+    const per = hhPerOf(rule, type);
+    const qty = Math.round(count * per * 100) / 100;
+    setLine(key, { hhCount: count, hhType: type, hhPer: per, hhUnit: rule.unit, unit: rule.unit || l.unit, reqQty: qty, orderQty: qty });
   };
 
   /** 기존 청구서 불러오기: 고른 줄을 지금 청구서 아래에 추가 (수량은 비우고, 단가·자재분류는 이 현장 기준으로 다시 자동) */
@@ -1209,6 +1229,9 @@ export default function ReqEdit() {
               <button className="btn-ghost h-7 text-[12px]" title="예전에 쓴 청구서의 품목 줄을 골라 아래에 추가" onClick={() => setImportOpen(true)}>
                 기존 청구서 불러오기
               </button>
+              <button className="btn-ghost h-7 text-[12px]" title="에어컨 매립 동관·멀티튜브, PB난방 롤관 등 세대수로 청구하는 품목의 세대당 수량" onClick={() => setHhOpen(true)}>
+                세대당 수량
+              </button>
               <button className="btn-ghost h-7 text-[12px]" title="품명·규격 목록에 없는 품목" onClick={() => setNewItem({ itemName: '', spec: '', unit: '', note: '' })}>
                 {isOffice ? '+ 새 품목 등록' : '+ 새 품목 요청'}
               </button>
@@ -1475,7 +1498,44 @@ export default function ReqEdit() {
                       <td className="num pt-2 text-muted" title={l.priorQtyManual != null ? '엑셀에서 받은 값' : '이전 승인 청구 합계'}>
                         {pq ? pq.toLocaleString() : ''}
                       </td>
-<td className="num font-semibold">{N(l.key, 'reqQty', l.reqQty, rowEd, 'w-full')}</td>
+<td className="num font-semibold">
+                        {(() => {
+                          const rule = hhRuleFor(hh.data, l.itemName, l.spec);
+                          if (rule && rowEd) {
+                            const per = hhPerOf(rule, rule.byType ? l.hhType : undefined);
+                            return (
+                              <div className="flex flex-col items-stretch gap-0.5" title="세대수 × 세대당 수량">
+                                {rule.byType && (
+                                  <select className="input h-6 px-0.5 text-[11px]" value={l.hhType ?? ''} onChange={(e) => setHh(l.key, { hhType: e.target.value })}>
+                                    <option value="">타입</option>
+                                    {(hh.data?.types ?? []).map((t) => (
+                                      <option key={t} value={t}>
+                                        {t} ({rule.perType?.[t] ?? 0}
+                                        {rule.unit})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                                <div className="flex items-center gap-0.5">
+                                  <NumInput className="input h-6 w-full min-w-0 px-1 text-right" value={l.hhCount ?? 0} onChange={(n) => setHh(l.key, { hhCount: n })} />
+                                  <span className="shrink-0 text-[10.5px] font-normal text-muted">세대</span>
+                                </div>
+                                <div className={`text-right text-[11px] ${l.hhCount && !l.hhPer ? 'text-red-600' : 'text-navy-900'}`}>
+                                  {l.hhCount && !per ? '세대당 수량 미설정' : `${(l.reqQty || 0).toLocaleString()}${rule.unit}`}
+                                </div>
+                              </div>
+                            );
+                          }
+                          if (isHhLine(l))
+                            return (
+                              <div className="leading-tight">
+                                <div className="text-[11px] font-normal text-muted">{l.hhCount}세대{l.hhType ? `(${l.hhType})` : ''}</div>
+                                <div>{(l.reqQty || 0).toLocaleString()}</div>
+                              </div>
+                            );
+                          return N(l.key, 'reqQty', l.reqQty, rowEd, 'w-full');
+                        })()}
+                      </td>
                                             <td>
                         {bonText(l) && <div className="pt-1 text-center text-[11.5px] font-semibold text-navy-900" title="금회청구 수량 ÷ 배관 1본 길이">{bonText(l)}</div>}
                         {rowEd || l.note ? T(l.key, 'note', l.note, rowEd, 'w-full', { placeholder: bonText(l) ? '(비고)' : '' }) : null}
@@ -1708,6 +1768,9 @@ export default function ReqEdit() {
         </div>
       )}
 
+      {hhOpen && d.siteId && (
+        <HhRatesEditor siteId={d.siteId} siteName={sites.data.find((s) => s.id === d.siteId)?.name ?? ''} rates={hh.data} canEdit={isOffice} itemOptions={itemOptions} who={profile?.name ?? ''} onClose={() => setHhOpen(false)} />
+      )}
       {importOpen && <ReqImportModal reqs={reqs.data} sites={sites.data} siteId={d.siteId} currentId={d.id} onAdd={addFromReq} onClose={() => setImportOpen(false)} />}
       <Modal
         open={pasteOpen}
@@ -2010,7 +2073,16 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
                 <td className={`${c} text-right`}>{nf(l.contractPrice)}</td>
                 <td className={`${c} text-right`}>{nf(l.execQty)}</td>
                 <td className={`${c} text-right`}>{nf(priorOf(l))}</td>
-                <td className={`${c} text-right font-semibold`}>{nf(l.reqQty)}</td>
+                <td className={`${c} text-right font-semibold`}>
+                  {isHhLine(l) ? (
+                    <>
+                      <div className="font-normal">{l.hhCount}세대</div>
+                      <div>{nf(l.reqQty)}</div>
+                    </>
+                  ) : (
+                    nf(l.reqQty)
+                  )}
+                </td>
                 <td className={`${c} text-center`}>{[bonText(l), l.note].filter(Boolean).join(' ')}</td>
                 <td className={`${c} text-right`}>{nf(l.orderQty || l.reqQty)}</td>
                 <td className={`${c} text-right`}>{nf(l.orderPrice)}</td>

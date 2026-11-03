@@ -103,6 +103,7 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
   // 7행 제목 줄: 공정 이름 + 위쪽 '사용 목적' 칸 (예: "세대외배관(복도) 위생 - 지하주차장 / 1~9동")
   set('B7', [req.processName, req.purpose].filter(Boolean).join(' - ') || null);
+  ws.getCell('B7').style = JSON.parse(JSON.stringify(ws.getCell('B7').style ?? {})); // 옆 칸과 같은 서식을 나눠 써서 복사 후 색칠
   ws.getCell('B7').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF99' } };
   // T7: 위쪽 '사용 위치·공정' 칸 내용 · T8부터: 품목 줄 비고
   const t7 = usePurposeOf(req);
@@ -125,11 +126,19 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`F${r}`, n(l.contractPrice));
     set(`G${r}`, n(l.execQty));
     set(`H${r}`, n(l.priorQty));
-    set(`I${r}`, n(l.reqQty));
+    if (l.hhCount && l.hhCount > 0) {
+      // 세대 청구: 윗줄 세대수, 아랫줄 총 수량
+      const ic = ws.getCell(`I${r}`);
+      ic.style = JSON.parse(JSON.stringify(ic.style ?? {}));
+      const f = { name: ic.font?.name ?? '굴림', color: { argb: 'FF000000' } };
+      ic.value = { richText: [{ text: `${l.hhCount}세대\n`, font: { ...f, size: 8 } }, { text: (l.reqQty || 0).toLocaleString(), font: { ...f, size: 10, bold: true } }] };
+      ic.alignment = { ...(ic.alignment ?? {}), wrapText: true, vertical: 'middle', horizontal: 'right' };
+    } else set(`I${r}`, n(l.reqQty));
     // 본/(비고): 프로그램 자재분류도 같이
     const cat = l.siteCategoryId ? catNames?.get(l.siteCategoryId) : undefined;
     //   본수·비고는 윗줄, 자재분류는 아랫줄 (예: "3.0본" ↵ "배관자재")
-    const jv = [bonNote(l), cat].filter(Boolean).join('\n');
+    const hhNote = l.hhCount && l.hhCount > 0 ? `${l.hhType ? `${l.hhType} ` : ''}${l.hhPer ?? 0}${l.hhUnit ?? ''}/세대` : '';
+    const jv = [hhNote || bonNote(l), cat].filter(Boolean).join('\n');
     set(`J${r}`, jv || null);
     if (jv) ws.getCell(`J${r}`).alignment = { ...(ws.getCell(`J${r}`).alignment ?? {}), wrapText: true, shrinkToFit: false, vertical: 'middle', horizontal: 'center' };
     set(`K${r}`, n(l.orderQty || l.reqQty));

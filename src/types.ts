@@ -228,6 +228,29 @@ export interface ReqLine {
   siteCategoryId?: string; // 자재분류(현장분류)
   inBase?: boolean; // 기본 청구서(내역)에 있는 품목인지 (false = 내역 외)
   catAuto?: boolean; // 품목의 자재분류로 자동으로 들어간 값 (품목을 바꾸면 다시 찾음)
+  hhCount?: number; // 세대 단위 청구: 세대수 (금회청구 = 세대수 × 세대당 수량)
+  hhType?: string; // 세대 타입 (예: 59A) — 타입별 세대당 수량일 때
+  hhPer?: number; // 그때 적용한 세대당 수량
+  hhUnit?: string; // 세대당 수량 단위 (M · 롤)
+}
+
+/** 현장별 세대당 수량 (에어컨 매립 동관·멀티튜브, PB난방 롤관 주문제작 등) — id = siteId */
+export interface HhRates {
+  id: string;
+  siteId: string;
+  types: string[]; // 세대 타입 목록 (예: 59A, 84B)
+  rules: HhRule[];
+  updatedAt?: number;
+  updatedBy?: string;
+}
+export interface HhRule {
+  id: string;
+  itemName: string;
+  spec?: string; // 비우면 모든 규격
+  unit: string; // M · 롤
+  byType: boolean; // true = 타입별 세대당 수량, false = 현장 하나의 값
+  qty?: number; // byType=false
+  perType?: Record<string, number>; // byType=true: 타입 → 세대당 수량
 }
 
 export interface ApprovalStepState {
