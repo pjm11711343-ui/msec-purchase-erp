@@ -502,7 +502,7 @@ export default function ReqEdit() {
     if (added.length) parts.push(`추가 ${added.length}줄(${added.slice(0, 3).map(nm).join(', ')}${added.length > 3 ? ' …' : ''})`);
     if (removed.length) parts.push(`삭제 ${removed.length}줄(${removed.slice(0, 3).map(nm).join(', ')}${removed.length > 3 ? ' …' : ''})`);
     if (changed.length) parts.push(`변경 ${changed.length}줄(${changed.slice(0, 3).map(nm).join(', ')}${changed.length > 3 ? ' …' : ''})`);
-    if (before && (before.purpose ?? '') !== (d.purpose ?? '')) parts.push('사용 목적');
+    if (before && (before.purpose ?? '') !== (d.purpose ?? '')) parts.push('사용 위치·공정');
     if (before && (before.docNo !== d.docNo || before.requestDate !== d.requestDate)) parts.push('결의번호·청구일');
     const summary = parts.join(' · ');
     save({}, summary ? `결재 중 수정: ${summary}` : '결재 중 저장', '수정 내용을 저장했습니다. 결재는 그대로 진행됩니다.');
@@ -1051,8 +1051,8 @@ export default function ReqEdit() {
             </Field>
           </div>
           <div className="col-span-2 md:col-span-4">
-            <Field label="사용 목적">
-              <input className="input" value={d.purpose ?? ''} disabled={!editable} onChange={(e) => setD({ ...d, purpose: e.target.value })} />
+            <Field label="사용 위치·공정">
+              <input className="input" placeholder="예: 지하주차장 위생배관 / 1~9동" value={d.purpose ?? ''} disabled={!editable} onChange={(e) => setD({ ...d, purpose: e.target.value })} />
             </Field>
           </div>
         </div>
@@ -1951,7 +1951,7 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
           <tbody>
             <tr>
               <td className={`${c} font-semibold`} colSpan={12}>
-                {[process, locs.length > 3 ? `${locs.slice(0, 3).join(' · ')} 외` : locs.join(' · ')].filter(Boolean).join(' - ')}
+                {[process, d.purpose].filter(Boolean).join(' - ')}
               </td>
               <td className={c}></td>
               <td className={`${c} text-center`}>사용 목적</td>
@@ -1972,7 +1972,7 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
                 <td className={`${c} text-right`}>{nf(amt(l))}</td>
                 <td className={`${c} break-words`}>{l.vendorName}</td>
                 <td className={`${c} whitespace-pre-wrap break-words text-[10px]`}>
-                  {i === 0 && d.purpose ? <div className="mb-0.5 font-semibold">{d.purpose}</div> : null}
+                  {i === 0 && locs.length ? <div className="mb-0.5 font-semibold">{locs.join(' · ')}</div> : null}
                   {[l.remark, catName(l.siteCategoryId)].filter(Boolean).join(' / ')}
                 </td>
               </tr>

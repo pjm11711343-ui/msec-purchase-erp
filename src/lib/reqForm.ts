@@ -1,9 +1,9 @@
 // 구매청구서 엑셀: 회사 기존 '청구서' 양식(public/templates/req-form.xlsx)에 값을 채워 내려받기
 // 양식 배치 (기존 청구서 엑셀과 동일)
 //   U2 현장명 · B4 "현장명 : ○○ 현장" · O4 결의 날짜 · S4 결의번호
-//   7행: 사용 위치·공정 제목 줄 · 품목: 8~20행(1쪽 13줄) → 35~188행(이어지는 쪽)
+//   7행: 공정 + 사용 위치·공정(위쪽 입력칸) 제목 줄 · 품목: 8~20행(1쪽 13줄) → 35~188행(이어지는 쪽)
 //     B 품명 · C 규격 · D 단위 · E 계약수량 · F 계약단가 · G 실행량 · H 기반입 · I 금회청구 · J 본/비고
-//     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 '사용 목적', T8 사용 목적 내용)
+//     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 '사용 목적' 제목, T8 줄들의 사용 위치·공정)
 //   분류 요약: 22·24·26·28행 B 분류 · C 계약 · D 변경(예상) · G 실행 · H 기반입금액 · I 금회청구
 //     금회청구 칸(I~M): 업체명은 위 작은 줄, 금액은 아래 줄 (22·24·26행 3곳, 28행 2곳). 전체는 '투입집계' 시트
 //   결재란: 29행 머리글, 31~32행 이름·승인일 (현장 M·O / 본사 T·U·V·W, 본사 5칸이면 R:S·T·U·V·W) — 결재선 순서대로
@@ -90,16 +90,20 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   set('B4', `현장명 : ${req.siteName}  현장`);
   set('O4', isNaN(date.getTime()) ? req.requestDate : date);
   set('S4', req.docNo || null);
-  set('T8', req.purpose || null);
+
 
   const lines = req.lines.filter((l) => l.itemName);
   // 양식의 금액 칸은 수식용 회색 글씨, 첫 줄 품명은 굵은 글씨라 일반 글씨로 맞춘다
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
-  // 7행 제목 줄: 이 청구서 줄들의 사용 위치·공정
+  // 7행 제목 줄: 공정 이름 + 위쪽 '사용 위치·공정' 칸 (예: "세대외배관(복도) 위생 - 지하주차장 / 1~9동")
+  set('B7', [req.processName, req.purpose].filter(Boolean).join(' - ') || null);
+  // T7 '사용 목적' 제목 아래(T8)에 이 청구서 줄들의 사용 위치·공정
   const locs = [...new Set(lines.map((l) => (l.location ?? '').trim()).filter(Boolean))];
-  const locText = locs.length ? (locs.length > 3 ? `${locs.slice(0, 3).join(' · ')} 외` : locs.join(' · ')) : '';
-  // 공정별 청구서는 공정 이름을 제목으로 (예: "세대외배관(복도) 위생")
-  set('B7', [req.processName, locText].filter(Boolean).join(' - ') || null);
+  set('T7', '사용 목적');
+  // T8은 첫 품목 줄의 비고 칸이기도 해서 첫 줄 비고는 아래 줄에 이어 적는다
+  const t8 = [locs.join(' · '), lines[0]?.remark?.trim()].filter(Boolean).join('\n');
+  set('T8', t8 || null);
+  if (t8) ws.getCell('T8').alignment = { ...(ws.getCell('T8').alignment ?? {}), wrapText: true, vertical: 'middle' };
   lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
     const r = ITEM_ROWS[i];
     set(`B${r}`, l.itemName);
