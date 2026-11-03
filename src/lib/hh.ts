@@ -11,14 +11,22 @@ import type { HhRates, HhRule, ReqLine } from '../types';
 export const HH_PRESETS: Omit<HhRule, 'id'>[] = [
   { itemName: '동관/멀티튜브(거실)', unit: 'M', byType: true, perType: {} },
   { itemName: '동관/멀티튜브(침실)', unit: 'M', byType: true, perType: {} },
-  { itemName: 'PB난방 롤관-주문제작', spec: '16A', unit: '롤', byType: false, qty: 0 },
-  { itemName: '난방롤관 IOS', spec: '16A', unit: '롤', byType: false, qty: 0 },
-  { itemName: '난방코일', spec: '16A', unit: '롤', byType: false, qty: 0 },
+  { itemName: 'PB난방 롤관-주문제작', spec: '16mm', unit: '롤', byType: false, qty: 0 },
+  { itemName: '난방롤관', spec: 'ISO 16mm 주문품', unit: '롤', byType: false, qty: 0 },
+  { itemName: '난방롤관ISO', spec: '16mm주문품', unit: '롤', byType: false, qty: 0 },
+];
+/** 예전에 잘못 넣었던 기본 품목 (수량을 안 넣은 채로 남아 있으면 정리) */
+const RETIRED = [
+  { itemName: 'PB난방 롤관-주문제작', spec: '16A' },
+  { itemName: '난방롤관 IOS', spec: '16A' },
+  { itemName: '난방코일', spec: '16A' },
 ];
 /** 저장된 설정에 없는 기본 품목을 뒤에 붙인다 (품명·규격 기준) */
 export function withPresets(rules: HhRule[], rid: () => string): HhRule[] {
-  const has = (p: Omit<HhRule, 'id'>) => rules.some((r) => normItem(r.itemName) === normItem(p.itemName) && normSpec(r.spec ?? '') === normSpec(p.spec ?? ''));
-  return [...rules, ...HH_PRESETS.filter((p) => !has(p)).map((p) => ({ ...p, id: rid() }))];
+  const retired = (r: HhRule) => !r.qty && !Object.values(r.perType ?? {}).some((v) => v > 0) && RETIRED.some((x) => normItem(x.itemName) === normItem(r.itemName) && normSpec(x.spec) === normSpec(r.spec ?? ''));
+  const kept = rules.filter((r) => !retired(r));
+  const hasK = (p: Omit<HhRule, 'id'>) => kept.some((r) => normItem(r.itemName) === normItem(p.itemName) && normSpec(r.spec ?? '') === normSpec(p.spec ?? ''));
+  return [...kept, ...HH_PRESETS.filter((p) => !hasK(p)).map((p) => ({ ...p, id: rid() }))];
 }
 
 export function useHhRates(siteId?: string) {
