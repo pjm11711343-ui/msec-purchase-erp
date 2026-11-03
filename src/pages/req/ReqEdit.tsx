@@ -1953,9 +1953,9 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
                 {[process, d.purpose].filter(Boolean).join(' - ')}
               </td>
               <td className={c}></td>
-              <td className={`${c} text-center`}>사용 위치·공정</td>
+              <td className={`${c} whitespace-pre-wrap break-words text-center text-[10px] font-semibold`}>{usePurposeOf(d)}</td>
             </tr>
-            {lines.map((l, i) => (
+            {lines.map((l) => (
               <tr key={l.key} className="align-top">
                 <td className={`${c} break-words`}>{l.itemName}</td>
                 <td className={`${c} break-words`}>{l.spec}</td>
@@ -1971,7 +1971,6 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
                 <td className={`${c} text-right`}>{nf(amt(l))}</td>
                 <td className={`${c} break-words`}>{l.vendorName}</td>
                 <td className={`${c} whitespace-pre-wrap break-words text-[10px]`}>
-                  {i === 0 && usePurposeOf(d) ? <div className="mb-0.5 font-semibold">{usePurposeOf(d)}</div> : null}
                   {[l.remark, catName(l.siteCategoryId)].filter(Boolean).join(' / ')}
                 </td>
               </tr>

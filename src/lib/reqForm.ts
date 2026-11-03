@@ -3,7 +3,7 @@
 //   U2 현장명 · B4 "현장명 : ○○ 현장" · O4 결의 날짜 · S4 결의번호
 //   7행: 공정 + 사용 위치·공정(위쪽 입력칸) 제목 줄 · 품목: 8~20행(1쪽 13줄) → 35~188행(이어지는 쪽)
 //     B 품명 · C 규격 · D 단위 · E 계약수량 · F 계약단가 · G 실행량 · H 기반입 · I 금회청구 · J 본/비고
-//     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 '사용 목적' 제목, T8 줄들의 사용 위치·공정)
+//     K 발주수량 · N 단가 · P 금액 · R 거래선 · T 비고 (T7 = 사용 위치·공정 칸 내용, T8부터 줄 비고)
 //   분류 요약: 22·24·26·28행 B 분류 · C 계약 · D 변경(예상) · G 실행 · H 기반입금액 · I 금회청구
 //     금회청구 칸(I~M): 업체명은 위 작은 줄, 금액은 아래 줄 (22·24·26행 3곳, 28행 2곳). 전체는 '투입집계' 시트
 //   결재란: 29행 머리글, 31~32행 이름·승인일 (현장 M·O / 본사 T·U·V·W, 본사 5칸이면 R:S·T·U·V·W) — 결재선 순서대로
@@ -101,14 +101,12 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const lines = req.lines.filter((l) => l.itemName);
   // 양식의 금액 칸은 수식용 회색 글씨, 첫 줄 품명은 굵은 글씨라 일반 글씨로 맞춘다
   const plain = { ...(ws.getCell('K8').font ?? {}), color: { argb: 'FF000000' } };
-  // 7행 제목 줄: 공정 이름 + 위쪽 '사용 위치·공정' 칸 (예: "세대외배관(복도) 위생 - 지하주차장 / 1~9동")
+  // 7행 제목 줄: 공정 이름 + 위쪽 '사용 목적' 칸 (예: "세대외배관(복도) 위생 - 지하주차장 / 1~9동")
   set('B7', [req.processName, req.purpose].filter(Boolean).join(' - ') || null);
-  // T7 '사용 위치·공정' 제목 아래(T8)에 청구서의 사용 위치·공정 (B7 제목 줄 = 공정 + 사용 목적)
-  set('T7', '사용 위치·공정');
-  // T8은 첫 품목 줄의 비고 칸이기도 해서 첫 줄 비고는 아래 줄에 이어 적는다
-  const t8 = [usePurposeOf(req), lines[0]?.remark?.trim()].filter(Boolean).join('\n');
-  set('T8', t8 || null);
-  if (t8) ws.getCell('T8').alignment = { ...(ws.getCell('T8').alignment ?? {}), wrapText: true, vertical: 'middle' };
+  // T7: 위쪽 '사용 위치·공정' 칸 내용 · T8부터: 품목 줄 비고
+  const t7 = usePurposeOf(req);
+  set('T7', t7 || null);
+  if (t7) ws.getCell('T7').alignment = { ...(ws.getCell('T7').alignment ?? {}), wrapText: true, vertical: 'middle', horizontal: 'center' };
   lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
     const r = ITEM_ROWS[i];
     set(`B${r}`, l.itemName);
@@ -129,7 +127,7 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`P${r}`, n(amt(l)));
     ws.getCell(`P${r}`).font = plain;
     set(`R${r}`, l.vendorName || null);
-    if (r !== 7 && r !== 8) set(`T${r}`, l.remark || null);
+    set(`T${r}`, l.remark || null);
   });
 
   // 분류 요약 (양식 4칸): 이번 청구 분류, 금액 큰 순. 넘치면 4번째 칸을 '외 N개'로 묶음
