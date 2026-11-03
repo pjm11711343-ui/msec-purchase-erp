@@ -107,7 +107,15 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   // T7: 위쪽 '사용 위치·공정' 칸 내용 · T8부터: 품목 줄 비고
   const t7 = usePurposeOf(req);
   set('T7', t7 || null);
-  if (t7) ws.getCell('T7').alignment = { ...(ws.getCell('T7').alignment ?? {}), wrapText: true, vertical: 'middle', horizontal: 'center' };
+  if (t7) {
+    const c7 = ws.getCell('T7');
+    c7.style = JSON.parse(JSON.stringify(c7.style ?? {}));
+    c7.alignment = { ...(c7.alignment ?? {}), wrapText: true, vertical: 'middle', horizontal: 'center' };
+    // T7:W7 칸 너비를 넘는 글이면 글씨 8 (11pt 기준 한글 1글자 ≈ 1.9칸, 영문·숫자 ≈ 1칸)
+    const width = ['T', 'U', 'V', 'W'].reduce((a, col) => a + (ws.getColumn(col).width ?? 8.43), 0);
+    const textW = [...t7].reduce((a, ch) => a + (/[\u1100-\u11ff\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch) ? 1.9 : 1), 0);
+    if (textW > width - 1) c7.font = { ...(c7.font ?? {}), size: 8 };
+  }
   lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
     const r = ITEM_ROWS[i];
     set(`B${r}`, l.itemName);
