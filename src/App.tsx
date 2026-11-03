@@ -24,6 +24,7 @@ import ItemsPrices from './pages/master/ItemsPrices';
 import Processes from './pages/master/Processes';
 import Statements from './pages/Statements';
 import Reconcile from './pages/Reconcile';
+import BillMonth from './pages/BillMonth';
 import Notices from './pages/Notices';
 import RfqPage from './pages/rfq/RfqPage';
 import ProcessBoard from './pages/process/ProcessBoard';
@@ -93,6 +94,7 @@ export default function App() {
         <Route path="master/processes" element={<Guard roles={OFFICE}><Processes /></Guard>} />
         <Route path="process" element={<ProcessBoard />} />
         <Route path="statements" element={<Statements />} />
+        <Route path="bill-month" element={<Guard roles={OFFICE}><BillMonth /></Guard>} />
         <Route path="reconcile" element={<Guard roles={OFFICE}><Reconcile /></Guard>} />
         <Route path="notices" element={<Guard roles={OFFICE}><Notices /></Guard>} />
         <Route path="rfq" element={<Guard roles={OFFICE}><RfqPage /></Guard>} />

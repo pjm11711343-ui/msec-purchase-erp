@@ -5,6 +5,7 @@ import { commitBatch, stripUndefined, useCollection } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { won } from '../../lib/normalize';
 import { useReceipts, useVendorPOs } from '../../lib/receipts';
+import { autoBillMonth, billedReceiptIds, billMonthOf, billPeriod, carryOf } from '../../lib/billing';
 import { Empty, errMsg, useToast } from '../../components/ui';
 import type { Invoice, InvoiceLine } from '../../types';
 import StatementModal from '../../components/StatementSheet';
@@ -24,11 +25,7 @@ export default function VendorStatement() {
   const [off, setOff] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
-  const billed = useMemo(() => {
-    const s = new Set<string>();
-    invoices.data.forEach((inv) => inv.lines.forEach((l) => l.receiptIds?.forEach((id) => s.add(id))));
-    return s;
-  }, [invoices.data]);
+  const billed = useMemo(() => billedReceiptIds(receipts.data, invoices.data), [receipts.data, invoices.data]);
   const sites = useMemo(() => {
     const m = new Map<string, string>();
     receipts.data.forEach((r) => m.set(r.siteId, r.siteName));
@@ -38,7 +35,7 @@ export default function VendorStatement() {
   const siteId = all ? '' : site || sites[0]?.[0] || '';
   const siteName = (id: string) => sites.find((x) => x[0] === id)?.[1] ?? '';
   const list = receipts.data
-    .filter((r) => (all || r.siteId === siteId) && r.date.startsWith(month) && !billed.has(r.id))
+    .filter((r) => (all || r.siteId === siteId) && billMonthOf(r) === month && !billed.has(r.id))
     .sort((a, b) => (all ? siteName(a.siteId).localeCompare(siteName(b.siteId), 'ko') : 0) || a.date.localeCompare(b.date));
   const poOf = (id: string) => pos.data.find((p) => p.id === id);
   const priceOf = (r: (typeof list)[number]) => poOf(r.poId)?.lines.find((l) => `${l.reqId}|${l.lineKey}` === r.lineKey);
@@ -130,6 +127,9 @@ export default function VendorStatement() {
               </option>
             ))}
           </select>
+          <span className="text-[11.5px] text-muted">
+            {month} 계산서 = {billPeriod(month).from} ~ {billPeriod(month).to} 입고분 (매월 20일 마감) + 이월분
+          </span>
           <span className="ml-auto text-[12px] text-muted">
             {chosen.length}줄 · {won(total)}원 (VAT 별도)
           </span>
@@ -176,7 +176,10 @@ export default function VendorStatement() {
                       />
                     </td>
                     {all && <td className="whitespace-nowrap font-medium">{siteName(r.siteId)}</td>}
-                    <td className="whitespace-nowrap">{r.date}</td>
+                    <td className="whitespace-nowrap">
+                      {r.date}
+                      {carryOf(r) > 0 && <span className="chip ml-1 bg-sky-50 text-sky-700">이월({autoBillMonth(r.date)}분)</span>}
+                    </td>
                     <td>{r.poNo}</td>
                     <td>{r.itemName}</td>
                     <td>{r.spec}</td>

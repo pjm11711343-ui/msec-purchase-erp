@@ -11,6 +11,7 @@ import { won } from '../lib/normalize';
 import { usePurchaseOrders } from '../lib/pos';
 import { usePoPrices, withVendorPrices } from '../lib/poPrices';
 import { poLineKey, useReceipts } from '../lib/receipts';
+import { billMonthOf } from '../lib/billing';
 import { Empty, PageHeader, Stat } from '../components/ui';
 import type { Invoice } from '../types';
 
@@ -79,7 +80,7 @@ export default function Reconcile() {
     };
     // ERP 입고: 이 달 입고 수량 × 발주 단가
     for (const r of receipts.data) {
-      if (!r.date?.startsWith(month)) continue;
+      if (billMonthOf(r) !== month) continue;
       const po = poMap.get(r.poId);
       const line = po?.lines.find((l) => poLineKey(l) === r.lineKey);
       const price = line?.price ?? 0;
@@ -127,7 +128,7 @@ export default function Reconcile() {
     <div>
       <PageHeader
         title="정산 대조"
-        desc="한 달 동안 현장에 들어온 입고(입고 수량 × 발주 단가)와 업체가 낸 거래명세서 금액을 업체·현장별로 맞춰 봅니다. 줄을 누르면 품목별로 어디가 다른지 보입니다."
+        desc="계산서월 기준 입고(입고 수량 × 발주 단가, 매월 20일 마감·이월 반영)와 업체가 낸 거래명세서 금액을 업체·현장별로 맞춰 봅니다. 줄을 누르면 품목별로 어디가 다른지 보입니다."
         actions={
           <div className="flex flex-wrap gap-2">
             <select className="input w-32" value={month} onChange={(e) => (setMonth(e.target.value), setOpen(null))}>

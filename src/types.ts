@@ -379,6 +379,9 @@ export interface Receipt {
   confirmed?: boolean; // 현장 확인
   confirmedByName?: string;
   confirmedAt?: number;
+  billMonth?: string; // 계산서월 YYYY-MM (자재부 지정). 없으면 입고일 기준 자동(21일~ 다음 달)
+  billBy?: string;
+  billAt?: number;
   createdAt: number;
 }
 
