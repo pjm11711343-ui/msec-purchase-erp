@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { where } from 'firebase/firestore';
 import { notifyQuiet } from '../../lib/notify';
 import { useAuth } from '../../auth/AuthContext';
@@ -24,14 +24,23 @@ export default function VendorPortal() {
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<'receipt' | 'sheet'>('receipt');
   const [filter, setFilter] = useState<'open' | 'all'>('open');
+  const [siteF, setSiteF] = useState(''); // 현장별 보기 ('' = 전체, 현장별로 묶어서)
   const [page, setPage] = useState<'po' | 'statement' | 'rfq'>('po');
   const vr = useVendorRfqs(vendor?.vendorId);
   const newRfq = vr.rfqs.data.filter((r) => r.status === 'sent' && !vr.quotes.data.some((q) => q.rfqId === r.id && q.status === 'submitted')).length;
   const rec = useMemo(() => receivedMap(receipts.data), [receipts.data]);
 
-  const list = pos.data
-    .map((p) => ({ p, prog: poProgress(p, rec) }))
-    .filter((x) => filter === 'all' || x.prog.state !== '입고완료');
+  const base = pos.data.map((p) => ({ p, prog: poProgress(p, rec) })).filter((x) => filter === 'all' || x.prog.state !== '입고완료');
+  // 현장 목록 (발주가 있는 현장, 남은 입고 건수)
+  const poSites = useMemo(() => {
+    const m = new Map<string, { name: string; n: number }>();
+    base.forEach(({ p }) => m.set(p.siteId, { name: p.siteName, n: (m.get(p.siteId)?.n ?? 0) + 1 }));
+    return [...m].sort((a, b) => a[1].name.localeCompare(b[1].name, 'ko'));
+  }, [base]);
+  // 현장별로 묶어서 (같은 현장 안에서는 최근 발주 먼저)
+  const list = base
+    .filter((x) => !siteF || x.p.siteId === siteF)
+    .sort((a, b) => a.p.siteName.localeCompare(b.p.siteName, 'ko') || b.p.orderDate.localeCompare(a.p.orderDate));
   const cur = pos.data.find((p) => p.id === open);
 
   const ack = async (id: string) => {
@@ -89,7 +98,15 @@ export default function VendorPortal() {
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
               <span className="font-semibold">발주서</span>
-              <select className="input ml-auto h-7" value={filter} onChange={(e) => setFilter(e.target.value as 'open' | 'all')}>
+              <select className="input ml-auto h-7" value={siteF} onChange={(e) => setSiteF(e.target.value)}>
+                <option value="">전체 현장 ({base.length})</option>
+                {poSites.map(([id, x]) => (
+                  <option key={id} value={id}>
+                    {x.name} ({x.n})
+                  </option>
+                ))}
+              </select>
+              <select className="input h-7" value={filter} onChange={(e) => setFilter(e.target.value as 'open' | 'all')}>
                 <option value="open">입고 남은 것</option>
                 <option value="all">전체</option>
               </select>
@@ -100,8 +117,10 @@ export default function VendorPortal() {
               <>
               {/* 폰: 발주 카드 */}
               <div className="flex flex-col gap-2 bg-canvas p-2 md:hidden">
-                {list.map(({ p, prog }) => (
-                  <div key={p.id} className="flex flex-col gap-1.5 rounded-xl border border-line bg-white p-3">
+                {list.map(({ p, prog }, i) => (
+                  <div key={p.id} className="flex flex-col gap-1.5">
+                  {(i === 0 || list[i - 1].p.siteId !== p.siteId) && <div className="px-1 pt-1 text-[12.5px] font-bold text-navy-950">{p.siteName}</div>}
+                  <div className="flex flex-col gap-1.5 rounded-xl border border-line bg-white p-3">
                     <button className="flex flex-col gap-1.5 text-left" onClick={() => (setOpen(p.id), setView('receipt'))}>
                       <div className="flex w-full items-center justify-between">
                         <span className="text-[14.5px] font-bold text-navy-950">{p.poNo}</span>
@@ -136,6 +155,7 @@ export default function VendorPortal() {
                       </button>
                     </div>
                   </div>
+                  </div>
                 ))}
               </div>
               <table className="tbl hidden md:table">
@@ -151,8 +171,16 @@ export default function VendorPortal() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map(({ p, prog }) => (
-                    <tr key={p.id} className="cursor-pointer" onClick={() => (setOpen(p.id), setView('receipt'))}>
+                  {list.map(({ p, prog }, i) => (
+                    <Fragment key={p.id}>
+                    {(i === 0 || list[i - 1].p.siteId !== p.siteId) && (
+                      <tr className="bg-navy-950/5">
+                        <td colSpan={7} className="py-1.5 font-bold text-navy-950">
+                          {p.siteName} <span className="ml-1 text-[11.5px] font-normal text-muted">{list.filter((x) => x.p.siteId === p.siteId).length}건</span>
+                        </td>
+                      </tr>
+                    )}
+                    <tr className="cursor-pointer" onClick={() => (setOpen(p.id), setView('receipt'))}>
                       <td className="whitespace-nowrap">{p.orderDate}</td>
                       <td className="font-semibold text-navy-900">{p.poNo}</td>
                       <td>{p.siteName}</td>
@@ -185,6 +213,7 @@ export default function VendorPortal() {
                         )}
                       </td>
                     </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

@@ -7,6 +7,7 @@ import { won } from '../../lib/normalize';
 import { useReceipts, useVendorPOs } from '../../lib/receipts';
 import { Empty, errMsg, useToast } from '../../components/ui';
 import type { Invoice, InvoiceLine } from '../../types';
+import StatementModal from '../../components/StatementSheet';
 
 const thisMonth = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7);
 
@@ -18,7 +19,8 @@ export default function VendorStatement() {
   const receipts = useReceipts();
   const invoices = useCollection<Invoice>(C.invoices, vendor ? [where('vendorId', '==', vendor.vendorId)] : [], vendor?.vendorId ?? '', !!vendor);
   const [month, setMonth] = useState(thisMonth());
-  const [site, setSite] = useState('');
+  const [site, setSite] = useState('__all'); // '__all' = 현장 구분 없이 전체
+  const [view, setView] = useState<Invoice | null>(null); // 제출한 거래명세 미리보기
   const [off, setOff] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -32,8 +34,12 @@ export default function VendorStatement() {
     receipts.data.forEach((r) => m.set(r.siteId, r.siteName));
     return [...m];
   }, [receipts.data]);
-  const siteId = site || sites[0]?.[0] || '';
-  const list = receipts.data.filter((r) => r.siteId === siteId && r.date.startsWith(month) && !billed.has(r.id)).sort((a, b) => a.date.localeCompare(b.date));
+  const all = site === '__all';
+  const siteId = all ? '' : site || sites[0]?.[0] || '';
+  const siteName = (id: string) => sites.find((x) => x[0] === id)?.[1] ?? '';
+  const list = receipts.data
+    .filter((r) => (all || r.siteId === siteId) && r.date.startsWith(month) && !billed.has(r.id))
+    .sort((a, b) => (all ? siteName(a.siteId).localeCompare(siteName(b.siteId), 'ko') : 0) || a.date.localeCompare(b.date));
   const poOf = (id: string) => pos.data.find((p) => p.id === id);
   const priceOf = (r: (typeof list)[number]) => poOf(r.poId)?.lines.find((l) => `${l.reqId}|${l.lineKey}` === r.lineKey);
   const chosen = list.filter((r) => !off.has(r.id));
@@ -41,10 +47,13 @@ export default function VendorStatement() {
 
   const submit = async () => {
     if (!vendor || !chosen.length) return;
-    if (!confirm(`${month} ${sites.find((s) => s[0] === siteId)?.[1]} 거래명세 ${chosen.length}줄, ${won(total)}원을 명신기공에 제출할까요?`)) return;
+    const bySite = [...new Set(chosen.map((r) => r.siteId))];
+    if (!confirm(`${month} ${all ? `전체 현장 (${bySite.length}개 현장, 현장마다 따로 제출)` : siteName(siteId)} 거래명세 ${chosen.length}줄, ${won(total)}원을 명신기공에 제출할까요?`)) return;
     setBusy(true);
     try {
-      const lines: InvoiceLine[] = chosen.map((r) => {
+      const ops: Parameters<typeof commitBatch>[0] = [];
+      for (const sid of bySite) {
+      const lines: InvoiceLine[] = chosen.filter((r) => r.siteId === sid).map((r) => {
         const pl = priceOf(r);
         const price = pl?.price ?? 0;
         return stripUndefined({
@@ -65,12 +74,12 @@ export default function VendorStatement() {
           receiptIds: [r.id],
         }) as InvoiceLine;
       });
-      const id = `${month}_${vendor.vendorId}_${siteId}_P${Date.now()}`;
+      const id = `${month}_${vendor.vendorId}_${sid}_P${Date.now()}`;
       const inv: Omit<Invoice, 'id'> = {
         month,
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
-        siteId,
+        siteId: sid,
         sheetName: '업체 포털',
         source: 'portal',
         fileName: '업체 포털 제출',
@@ -83,8 +92,10 @@ export default function VendorStatement() {
         uploadedBy: vendor.vendorName,
         uploadedAt: Date.now(),
       };
-      await commitBatch([{ type: 'set', col: C.invoices, id, data: inv, merge: false }]);
-      toast('거래명세를 제출했습니다. 명신기공 자재부가 확인합니다.');
+      ops.push({ type: 'set', col: C.invoices, id, data: inv, merge: false });
+      }
+      await commitBatch(ops);
+      toast(`거래명세를 제출했습니다${bySite.length > 1 ? ` (${bySite.length}개 현장 각각)` : ''}. 명신기공 자재부가 확인합니다.`);
       setOff(new Set());
     } catch (e) {
       toast(errMsg(e), 'err');
@@ -112,6 +123,7 @@ export default function VendorStatement() {
           <span className="font-semibold">거래명세 작성</span>
           <input className="input h-7 w-32" type="month" value={month} onChange={(e) => (setMonth(e.target.value), setOff(new Set()))} />
           <select className="input h-7" value={siteId} onChange={(e) => (setSite(e.target.value), setOff(new Set()))}>
+            <option value="__all">전체 현장</option>
             {sites.map(([id, name]) => (
               <option key={id} value={id}>
                 {name}
@@ -126,7 +138,7 @@ export default function VendorStatement() {
           </button>
         </div>
         {!list.length ? (
-          <Empty>이 달·현장에 아직 청구하지 않은 입고 기록이 없습니다. 먼저 발주서에서 입고를 등록하세요.</Empty>
+          <Empty>{all ? '이 달' : '이 달·현장'}에 아직 청구하지 않은 입고 기록이 없습니다. 먼저 발주서에서 입고를 등록하세요.</Empty>
         ) : (
           <table className="tbl">
             <thead>
@@ -134,6 +146,7 @@ export default function VendorStatement() {
                 <th className="w-8">
                   <input type="checkbox" checked={!off.size} onChange={(e) => setOff(e.target.checked ? new Set() : new Set(list.map((r) => r.id)))} />
                 </th>
+                {all && <th>현장</th>}
                 <th>입고일</th>
                 <th>발주번호</th>
                 <th>품명</th>
@@ -162,6 +175,7 @@ export default function VendorStatement() {
                         }
                       />
                     </td>
+                    {all && <td className="whitespace-nowrap font-medium">{siteName(r.siteId)}</td>}
                     <td className="whitespace-nowrap">{r.date}</td>
                     <td>{r.poNo}</td>
                     <td>{r.itemName}</td>
@@ -200,12 +214,15 @@ export default function VendorStatement() {
               {mine.map((i) => (
                 <tr key={i.id}>
                   <td>{i.month}</td>
-                  <td>{i.lines[0] ? sites.find((s) => s[0] === i.siteId)?.[1] ?? '' : ''}</td>
+                  <td>{siteName(i.siteId)}</td>
                   <td className="num">{i.lineCount}</td>
                   <td className="num">{won(i.totalAmount)}</td>
                   <td className="text-muted">{i.submittedAt ? new Date(i.submittedAt).toLocaleDateString('ko-KR') : ''}</td>
                   <td>{i.appliedToLedger ? <span className="chip bg-emerald-50 text-emerald-700">명신기공 확인 완료</span> : <span className="chip bg-amber-soft text-amber-800">확인 대기</span>}</td>
                   <td className="text-right">
+                    <button className="mr-2 text-[12px] text-sky-700 hover:underline" onClick={() => setView(i)}>
+                      미리보기·출력
+                    </button>
                     {!i.appliedToLedger && (
                       <button className="text-[12px] text-muted hover:text-red-600" onClick={() => withdraw(i)}>
                         제출 취소
@@ -218,6 +235,7 @@ export default function VendorStatement() {
           </table>
         )}
       </div>
+      {view && <StatementModal inv={view} siteName={siteName(view.siteId)} onClose={() => setView(null)} />}
       <p className="text-[12px] text-muted">세금계산서는 기존처럼 발행해 주시고, 여기서는 입고 내역 기준 청구 금액을 미리 맞춰 봅니다.</p>
     </div>
   );

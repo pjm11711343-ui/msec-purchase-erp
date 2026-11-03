@@ -75,7 +75,7 @@ service cloud.firestore {
       allow write: if isOffice();
     }
     match /erp_invoices/{id} {
-      allow read: if isOffice() || isExec() || (isVendor() && resource.data.vendorId == myVendor());
+      allow read: if isOffice() || isExec() || hasSite(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
       allow create: if isOffice()
         || (isVendor() && request.resource.data.vendorId == myVendor()
             && request.resource.data.source == 'portal' && request.resource.data.appliedToLedger == false);

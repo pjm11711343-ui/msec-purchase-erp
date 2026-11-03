@@ -42,6 +42,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { to: '/rfq', label: '견적 의뢰', roles: OFFICE },
       { to: '/po', label: '발주', roles: ALL },
       { to: '/receipt', label: '입고 현황', roles: ALL },
+      { to: '/statements', label: '거래명세서', roles: ALL },
       { to: '/invoices', label: '계산서', roles: OFFICE },
     ],
   },

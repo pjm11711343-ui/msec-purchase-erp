@@ -170,6 +170,7 @@ export const EXEC_MENUS: { to: string; label: string; group: string }[] = [
   { to: '/req', label: '구매청구', group: '구매 흐름' },
   { to: '/po', label: '발주', group: '구매 흐름' },
   { to: '/receipt', label: '입고 현황', group: '구매 흐름' },
+  { to: '/statements', label: '거래명세서', group: '구매 흐름' },
 ];
 /** 주소 → 해당 메뉴 ('/req/123'은 '/req') */
 export const execMenuOf = (path: string) => EXEC_MENUS.find((m) => (m.to === '/' ? path === '/' : path === m.to || path.startsWith(`${m.to}/`)));
