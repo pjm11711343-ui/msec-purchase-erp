@@ -2,19 +2,39 @@
 //  - 세대 타입 목록 (예: 59A, 84B)
 //  - 품목마다: 단위(M·롤), 타입별 세대당 수량 또는 현장 하나의 값
 import { useState } from 'react';
-import { audit, commitBatch } from '../lib/db';
+import { audit, commitBatch, newId } from '../lib/db';
 import { C } from '../lib/firebase';
-import { HH_PRESETS } from '../lib/hh';
+import { withPresets } from '../lib/hh';
+import { normItem, normSpec } from '../lib/itemNorm';
 import type { HhRates, HhRule } from '../types';
 import { errMsg, Modal, NumInput, useToast } from './ui';
 
 const rid = () => Math.random().toString(36).slice(2, 9);
 
-export default function HhRatesEditor({ siteId, siteName, rates, canEdit, itemOptions, who, onClose }: { siteId: string; siteName: string; rates?: HhRates; canEdit: boolean; itemOptions: string[]; who: string; onClose: () => void }) {
+export default function HhRatesEditor({
+  siteId,
+  siteName,
+  rates,
+  canEdit,
+  itemOptions,
+  hasItem,
+  who,
+  onClose,
+}: {
+  siteId: string;
+  siteName: string;
+  rates?: HhRates;
+  canEdit: boolean;
+  itemOptions: string[];
+  /** 품명·규격이 청구서 품목 목록에 있는지 */
+  hasItem: (item: string, spec: string) => boolean;
+  who: string;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const [types, setTypes] = useState<string[]>(rates?.types ?? []);
   const [typeIn, setTypeIn] = useState('');
-  const [rules, setRules] = useState<HhRule[]>(rates?.rules?.length ? rates.rules : HH_PRESETS.map((p) => ({ ...p, id: rid() })));
+  const [rules, setRules] = useState<HhRule[]>(() => withPresets(rates?.rules ?? [], rid));
   const [busy, setBusy] = useState(false);
   const upd = (id: string, patch: Partial<HhRule>) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
@@ -38,7 +58,19 @@ export default function HhRatesEditor({ siteId, siteName, rates, canEdit, itemOp
         byType: r.byType,
         ...(r.byType ? { perType: Object.fromEntries(Object.entries(r.perType ?? {}).filter(([t, v]) => types.includes(t) && v > 0)) } : { qty: r.qty || 0 }),
       }));
-      await commitBatch([{ type: 'set', col: C.hhRates, id: siteId, data: { siteId, types, rules: clean, updatedAt: Date.now(), updatedBy: who }, merge: false }]);
+      // 품목 목록에 없는 품명·규격(예: 난방코일 16A 롤)은 품목으로 같이 등록해서 청구서에서 고를 수 있게
+      const seen = new Set<string>();
+      const newItems = clean.filter((r) => r.spec && !hasItem(r.itemName, r.spec) && !seen.has(`${normItem(r.itemName)}|${normSpec(r.spec)}`) && seen.add(`${normItem(r.itemName)}|${normSpec(r.spec)}`));
+      await commitBatch([
+        { type: 'set', col: C.hhRates, id: siteId, data: { siteId, types, rules: clean, updatedAt: Date.now(), updatedBy: who }, merge: false },
+        ...newItems.map((r) => ({
+          type: 'set' as const,
+          col: C.items,
+          id: newId(C.items),
+          data: { itemName: r.itemName, spec: r.spec!, unit: r.unit, status: 'active', note: '세대당 수량 설정에서 등록', requestedByName: who, requestSiteName: siteName, createdAt: Date.now() },
+        })),
+      ]);
+      if (newItems.length) toast(`품목 목록에 없던 ${newItems.map((r) => `${r.itemName} ${r.spec}`).join(', ')}을(를) 품목으로 등록했습니다.`);
       await audit('세대당 수량 설정', siteName, { rules: clean.length });
       toast('저장했습니다. 청구서에서 세대수만 넣으면 수량이 계산됩니다.');
       onClose();

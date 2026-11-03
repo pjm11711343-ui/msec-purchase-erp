@@ -1769,7 +1769,7 @@ export default function ReqEdit() {
       )}
 
       {hhOpen && d.siteId && (
-        <HhRatesEditor siteId={d.siteId} siteName={sites.data.find((s) => s.id === d.siteId)?.name ?? ''} rates={hh.data} canEdit={isOffice} itemOptions={itemOptions} who={profile?.name ?? ''} onClose={() => setHhOpen(false)} />
+        <HhRatesEditor siteId={d.siteId} siteName={sites.data.find((s) => s.id === d.siteId)?.name ?? ''} rates={hh.data} canEdit={isOffice} itemOptions={itemOptions} hasItem={(i, sp) => itemSet.has(normItem(i)) && specOk(i, sp)} who={profile?.name ?? ''} onClose={() => setHhOpen(false)} />
       )}
       {importOpen && <ReqImportModal reqs={reqs.data} sites={sites.data} siteId={d.siteId} currentId={d.id} onAdd={addFromReq} onClose={() => setImportOpen(false)} />}
       <Modal

@@ -11,8 +11,15 @@ import type { HhRates, HhRule, ReqLine } from '../types';
 export const HH_PRESETS: Omit<HhRule, 'id'>[] = [
   { itemName: '동관/멀티튜브(거실)', unit: 'M', byType: true, perType: {} },
   { itemName: '동관/멀티튜브(침실)', unit: 'M', byType: true, perType: {} },
-  { itemName: 'PB난방 롤관-주문제작', unit: '롤', byType: false, qty: 0 },
+  { itemName: 'PB난방 롤관-주문제작', spec: '16A', unit: '롤', byType: false, qty: 0 },
+  { itemName: '난방롤관 IOS', spec: '16A', unit: '롤', byType: false, qty: 0 },
+  { itemName: '난방코일', spec: '16A', unit: '롤', byType: false, qty: 0 },
 ];
+/** 저장된 설정에 없는 기본 품목을 뒤에 붙인다 (품명·규격 기준) */
+export function withPresets(rules: HhRule[], rid: () => string): HhRule[] {
+  const has = (p: Omit<HhRule, 'id'>) => rules.some((r) => normItem(r.itemName) === normItem(p.itemName) && normSpec(r.spec ?? '') === normSpec(p.spec ?? ''));
+  return [...rules, ...HH_PRESETS.filter((p) => !has(p)).map((p) => ({ ...p, id: rid() }))];
+}
 
 export function useHhRates(siteId?: string) {
   const [s, setS] = useState<{ data?: HhRates; loading: boolean }>({ loading: true });
