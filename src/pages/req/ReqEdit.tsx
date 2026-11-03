@@ -502,8 +502,8 @@ export default function ReqEdit() {
     if (added.length) parts.push(`추가 ${added.length}줄(${added.slice(0, 3).map(nm).join(', ')}${added.length > 3 ? ' …' : ''})`);
     if (removed.length) parts.push(`삭제 ${removed.length}줄(${removed.slice(0, 3).map(nm).join(', ')}${removed.length > 3 ? ' …' : ''})`);
     if (changed.length) parts.push(`변경 ${changed.length}줄(${changed.slice(0, 3).map(nm).join(', ')}${changed.length > 3 ? ' …' : ''})`);
-    if (before && (before.purpose ?? '') !== (d.purpose ?? '')) parts.push('사용 위치·공정');
-    if (before && usePurposeOf(before) !== usePurposeOf(d)) parts.push('사용 목적');
+    if (before && (before.purpose ?? '') !== (d.purpose ?? '')) parts.push('사용 목적');
+    if (before && usePurposeOf(before) !== usePurposeOf(d)) parts.push('사용 위치·공정');
     if (before && (before.docNo !== d.docNo || before.requestDate !== d.requestDate)) parts.push('결의번호·청구일');
     const summary = parts.join(' · ');
     save({}, summary ? `결재 중 수정: ${summary}` : '결재 중 저장', '수정 내용을 저장했습니다. 결재는 그대로 진행됩니다.');
@@ -1052,13 +1052,13 @@ export default function ReqEdit() {
             </Field>
           </div>
           <div className="col-span-2 md:col-span-4">
-            <Field label="사용 위치·공정">
+            <Field label="사용 목적">
               <input className="input" placeholder="예: 지하주차장 위생배관 / 1~9동" value={d.purpose ?? ''} disabled={!editable} onChange={(e) => setD({ ...d, purpose: e.target.value })} />
             </Field>
           </div>
           <div className="col-span-2 md:col-span-4">
-            <Field label="사용 목적">
-              <input className="input" placeholder="예: 101~102동 PIT 배관 부족분" value={usePurposeOf(d)} disabled={!editable} onChange={(e) => setD({ ...d, usePurpose: e.target.value })} />
+            <Field label="사용 위치·공정">
+              <input className="input" placeholder="예: 101~102동 PIT" value={usePurposeOf(d)} disabled={!editable} onChange={(e) => setD({ ...d, usePurpose: e.target.value })} />
             </Field>
           </div>
         </div>
@@ -1688,7 +1688,7 @@ export default function ReqEdit() {
         }
       >
         <p className="mb-2 text-muted">엑셀에서 아래 순서로 열을 복사해 붙여넣으세요 (머리글 제외).</p>
-        <div className="mb-2 rounded-md bg-canvas px-3 py-2 font-mono text-[12px]">품명 ⇥ 규격 ⇥ 단위 ⇥ 금회청구 ⇥ 비고 ⇥ 사용 목적(위치)</div>
+        <div className="mb-2 rounded-md bg-canvas px-3 py-2 font-mono text-[12px]">품명 ⇥ 규격 ⇥ 단위 ⇥ 금회청구 ⇥ 비고 ⇥ 사용 위치·공정</div>
         <textarea className="input h-48 w-full py-2 font-mono text-[12px]" value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
       </Modal>
 
@@ -1953,7 +1953,7 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
                 {[process, d.purpose].filter(Boolean).join(' - ')}
               </td>
               <td className={c}></td>
-              <td className={`${c} text-center`}>사용 목적</td>
+              <td className={`${c} text-center`}>사용 위치·공정</td>
             </tr>
             {lines.map((l, i) => (
               <tr key={l.key} className="align-top">
