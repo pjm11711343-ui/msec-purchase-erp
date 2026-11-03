@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { C, db } from '../lib/firebase';
+import { EXEC_MENUS, execMenuOf } from '../types';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL, type Role } from '../types';
 import { usePurchaseOrders } from '../lib/pos';
@@ -71,6 +74,21 @@ export default function Layout() {
   const wide = /^\/req\/./.test(loc.pathname);
   // 폰·태블릿 세로: 메뉴는 ☰로 여닫는 서랍 / PC: 왼쪽 고정 (접기 가능)
   const [open, setOpen] = useState(false);
+  // 결재자(대표·사장): 관리자가 허용한 메뉴만 (설정 › 결재자 화면에 보일 메뉴)
+  const isExec = role === 'executive';
+  const [execMenus, setExecMenus] = useState<string[] | null | undefined>(undefined); // undefined = 읽는 중, null = 제한 없음
+  useEffect(() => {
+    if (!isExec) return;
+    return onSnapshot(
+      doc(db, C.settings, 'main'),
+      (d) => setExecMenus((d.data()?.execMenus as string[] | undefined) ?? null),
+      () => setExecMenus(null),
+    );
+  }, [isExec]);
+  const execAllowed = (to: string) => !isExec || !execMenus || !EXEC_MENUS.some((m) => m.to === to) || execMenus.includes(to);
+  const curMenu = execMenuOf(loc.pathname);
+  const blocked = isExec && execMenus !== undefined && !!curMenu && !execAllowed(curMenu.to);
+  const firstAllowed = EXEC_MENUS.find((m) => execAllowed(m.to))?.to;
   const [mini, setMini] = useState(() => {
     try {
       return localStorage.getItem('erp.navMini') === '1';
@@ -129,7 +147,7 @@ export default function Layout() {
         </div>
         <nav className={`flex-1 overflow-y-auto pb-4 px-3 ${mini ? 'lg:px-1.5' : ''}`}>
           {GROUPS.map((g) => {
-            const items = g.items.filter((i) => i.soon || (role && (!i.roles || i.roles.includes(role))));
+            const items = g.items.filter((i) => i.soon || (role && (!i.roles || i.roles.includes(role)) && execAllowed(i.to)));
             if (!items.length) return null;
             return (
               <div key={g.title} className="mb-4">
@@ -183,7 +201,17 @@ export default function Layout() {
             </div>
           )}
           {(role === 'admin' || role === 'material') && <PoPriceSync />}
-          <Outlet />
+          {isExec && execMenus === undefined ? (
+            <div className="text-muted">불러오는 중…</div>
+          ) : blocked ? (
+            firstAllowed && firstAllowed !== curMenu?.to ? (
+              <Navigate to={firstAllowed} replace />
+            ) : (
+              <div className="card p-6 text-center text-muted">관리자가 이 메뉴를 열어 두지 않았습니다. 필요하면 관리자에게 요청하세요.</div>
+            )
+          ) : (
+            <Outlet />
+          )}
         </div>
       </main>
     </div>

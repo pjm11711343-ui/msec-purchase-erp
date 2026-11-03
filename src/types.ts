@@ -149,7 +149,21 @@ export interface Settings {
   cutoffMonth: string; // 이관 기준월 (예: 2026-09)
   priceTolerance: number; // 단가 허용 오차(원)
   siteCodePrefix: string; // 현장코드 접두어 (예: MS)
+  execMenus?: string[]; // 결재자(대표·사장)에게 보여 줄 메뉴 주소 (없으면 전부)
 }
+
+/** 결재자(대표·사장) 화면에서 관리자가 켜고 끌 수 있는 메뉴 */
+export const EXEC_MENUS: { to: string; label: string; group: string }[] = [
+  { to: '/', label: '대시보드', group: '현황' },
+  { to: '/summary', label: '투입집계', group: '현황' },
+  { to: '/items', label: '월별 품목', group: '현황' },
+  { to: '/process', label: '공정별 청구', group: '구매 흐름' },
+  { to: '/req', label: '구매청구', group: '구매 흐름' },
+  { to: '/po', label: '발주', group: '구매 흐름' },
+  { to: '/receipt', label: '입고 현황', group: '구매 흐름' },
+];
+/** 주소 → 해당 메뉴 ('/req/123'은 '/req') */
+export const execMenuOf = (path: string) => EXEC_MENUS.find((m) => (m.to === '/' ? path === '/' : path === m.to || path.startsWith(`${m.to}/`)));
 
 export const DEFAULT_SETTINGS: Settings = {
   cutoffMonth: '2026-09',
