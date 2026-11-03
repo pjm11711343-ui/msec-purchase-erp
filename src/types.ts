@@ -23,6 +23,7 @@ export interface ErpUser {
   position?: string; // 직급
   signImage?: string; // 결재 싸인 (PNG data URL, 바탕 투명)
   telegramChatId?: string; // 개인 텔레그램 (결재 차례 알림)
+  menus?: string[] | null; // 결재자 개인별 보일 메뉴 (없으면 설정의 공통값)
 }
 
 export interface Site {

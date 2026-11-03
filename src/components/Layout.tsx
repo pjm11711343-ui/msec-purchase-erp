@@ -85,7 +85,9 @@ export default function Layout() {
       () => setExecMenus(null),
     );
   }, [isExec]);
-  const execAllowed = (to: string) => !isExec || !execMenus || !EXEC_MENUS.some((m) => m.to === to) || execMenus.includes(to);
+  // 개인별 설정(대표이사·사장 따로)이 있으면 그것, 없으면 공통값
+  const myMenus = profile?.menus ?? execMenus;
+  const execAllowed = (to: string) => !isExec || !myMenus || !EXEC_MENUS.some((m) => m.to === to) || myMenus.includes(to);
   const curMenu = execMenuOf(loc.pathname);
   const blocked = isExec && execMenus !== undefined && !!curMenu && !execAllowed(curMenu.to);
   const firstAllowed = EXEC_MENUS.find((m) => execAllowed(m.to))?.to;
