@@ -352,6 +352,8 @@ export default function ReqEdit() {
   const invalidLine = (l: ReqLine) =>
     !!l.itemName.trim() && (!itemSet.has(normItem(l.itemName)) || (!!l.spec.trim() && !specOk(l.itemName, l.spec)));
 
+  /** 발주수량 > 금회청구 (엑셀에서 불러온 예전 청구서 등) */
+  const overOrder = (l: ReqLine) => !!l.itemName.trim() && (l.orderQty || 0) > (l.reqQty || 0);
   const total = d.lines.reduce((a, l) => a + lineAmount(l), 0);
   const summary = reqSummary(d, cats.data, reqs.data, pos.data);
   /** 이 청구서에서 이미 발주된 발주서 (결재 중이면 선발주) */
@@ -379,6 +381,9 @@ export default function ReqEdit() {
 
   const save = async (patch: Partial<Requisition>, action: string, okMsg: string) => {
     if (!d.siteId) return toast('현장을 고르세요.', 'err');
+    const over = d.lines.filter(overOrder);
+    if (over.length && patch.status !== 'rejected' && (editable || orderEditable))
+      return toast(`발주수량이 금회청구보다 많은 줄이 ${over.length}개 있습니다 (빨간 칸: ${over.slice(0, 3).map((l) => l.itemName).join(', ')}${over.length > 3 ? ' …' : ''}). 발주수량을 금회청구 이하로 고치세요.`, 'err');
     setBusy(true);
     try {
       const rid = d.id ?? newId(C.requisitions);
@@ -782,9 +787,20 @@ export default function ReqEdit() {
       setBusy(false);
     }
   };
-  const N = (key: string, field: keyof ReqLine, v: number, on: boolean | undefined, w = 'w-20') =>
+  /** 발주수량은 금회청구 수량을 넘을 수 없다 */
+  const setQty = (key: string, field: keyof ReqLine, n: number) => {
+    const l = d.lines.find((x) => x.key === key);
+    if (l && field === 'orderQty' && n > (l.reqQty || 0)) {
+      toast(`발주수량은 금회청구 수량(${(l.reqQty || 0).toLocaleString()})보다 클 수 없습니다.`, 'err');
+      return setLine(key, { orderQty: l.reqQty || 0 });
+    }
+    // 금회청구를 줄이면 그보다 큰 발주수량도 같이 줄임
+    if (l && field === 'reqQty' && (l.orderQty || 0) > n) return setLine(key, { reqQty: n, orderQty: n });
+    setLine(key, { [field]: n } as Partial<ReqLine>);
+  };
+  const N = (key: string, field: keyof ReqLine, v: number, on: boolean | undefined, w = 'w-20', bad = false) =>
     on ? (
-      <NumInput className={`input h-7 ${w} px-1.5 text-right`} value={v} onChange={(n) => setLine(key, { [field]: n } as Partial<ReqLine>)} />
+      <NumInput className={`input h-7 ${w} px-1.5 text-right ${bad ? 'border-red-400 bg-red-50 text-red-700' : ''}`} value={v} onChange={(n) => setQty(key, field, n)} />
     ) : (
       <span className="tabular-nums">{v ? v.toLocaleString() : ''}</span>
     );
@@ -1437,7 +1453,9 @@ export default function ReqEdit() {
                         {bonText(l) && <div className="pt-1 text-center text-[11.5px] font-semibold text-navy-900" title="금회청구 수량 ÷ 배관 1본 길이">{bonText(l)}</div>}
                         {rowEd || l.note ? T(l.key, 'note', l.note, rowEd, 'w-full', { placeholder: bonText(l) ? '(비고)' : '' }) : null}
                       </td>
-<td className="num bg-amber-soft/40">{N(l.key, 'orderQty', l.orderQty || l.reqQty, rowOrderEd, 'w-full')}</td>
+<td className={`num ${overOrder(l) ? 'bg-red-50 font-semibold text-red-700' : 'bg-amber-soft/40'}`} title={overOrder(l) ? '발주수량이 금회청구보다 많습니다' : undefined}>
+                        {N(l.key, 'orderQty', l.orderQty || l.reqQty, rowOrderEd, 'w-full', overOrder(l))}
+                      </td>
                       <td className="num bg-amber-soft/40">
                         <div className="flex items-center justify-end gap-0.5">
                           {N(l.key, 'orderPrice', l.orderPrice, rowOrderEd, 'w-full min-w-0')}
