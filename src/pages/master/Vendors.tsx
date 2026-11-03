@@ -16,6 +16,8 @@ export default function Vendors() {
   const toast = useToast();
   const [issued, setIssued] = useState<{ vendor: string; code: string; access: string } | null>(null);
   const [issuing, setIssuing] = useState(false);
+  const [info, setInfo] = useState<Vendor | null>(null);
+  const recent = vendors.data.filter((v) => v.vendorUpdatedAt && Date.now() - v.vendorUpdatedAt < 30 * 86400e3).sort((a, b) => (b.vendorUpdatedAt ?? 0) - (a.vendorUpdatedAt ?? 0));
   const accountOf = (vid: string) => accounts.data.find((a) => a.vendorId === vid && a.active);
 
   const issue = async (v: Vendor) => {
@@ -54,6 +56,9 @@ export default function Vendors() {
     mobile: String(d.mobile ?? '').trim() || undefined,
     address: String(d.address ?? '').trim() || undefined,
     bizNo: String(d.bizNo ?? '').trim() || undefined,
+    fax: String(d.fax ?? '').trim() || undefined,
+    ceoName: String(d.ceoName ?? '').trim() || undefined,
+    vendorNote: String(d.vendorNote ?? '').trim() || undefined,
     aliases: toList(d.aliases),
     active: prev?.active ?? true,
   });
@@ -71,13 +76,40 @@ export default function Vendors() {
 
   return (
     <div>
-      <PageHeader title="업체" desc="발주·계산서를 주고받는 공급업체입니다. 이메일은 3단계 발주서 발송, 접속코드는 4단계 업체 포털에서 씁니다." />
+      <PageHeader title="업체" desc="발주·계산서를 주고받는 공급업체입니다. 업체명 옆 '정보'를 누르면 업체가 포털에서 입력한 내용까지 모두 볼 수 있습니다." />
+      {recent.length > 0 && (
+        <div className="card mb-3 px-4 py-2.5 text-[12.5px]">
+          <span className="mr-2 font-semibold text-sky-800">최근 30일 업체가 직접 고친 정보 {recent.length}건</span>
+          {recent.map((v) => (
+            <button key={v.id} className="chip mb-1 mr-1 bg-sky-50 text-sky-700 hover:bg-sky-100" onClick={() => setInfo(v)}>
+              {v.name} · {new Date(v.vendorUpdatedAt!).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
+            </button>
+          ))}
+        </div>
+      )}
       <CrudTable<Vendor>
         rows={vendors.data}
         loading={vendors.loading}
-        search={(v) => [v.name, v.phone, v.email, v.contactName, ...(v.aliases ?? [])].join(' ')}
+        search={(v) => [v.name, v.phone, v.email, v.contactName, v.mobile, v.bizNo, v.ceoName, ...(v.aliases ?? [])].join(' ')}
         columns={[
-          { key: 'name', label: '업체명', render: (v) => <span className="font-medium">{v.name}</span> },
+          {
+            key: 'name',
+            label: '업체명',
+            render: (v) => (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="font-medium">{v.name}</span>
+                <button
+                  className="rounded border border-line px-1.5 text-[11px] text-sky-700 hover:bg-sky-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInfo(v);
+                  }}
+                >
+                  정보
+                </button>
+              </span>
+            ),
+          },
           { key: 'phone', label: '전화' },
           { key: 'email', label: '이메일' },
           {
@@ -154,7 +186,10 @@ export default function Vendors() {
           { key: 'contactName', label: '담당자' },
           { key: 'mobile', label: '담당자 휴대폰' },
           { key: 'bizNo', label: '사업자등록번호' },
+          { key: 'ceoName', label: '대표자' },
+          { key: 'fax', label: '팩스' },
           { key: 'address', label: '주소' },
+          { key: 'vendorNote', label: '업체 안내 (납품 가능 시간 등)', type: 'textarea' },
           { key: 'aliases', label: '다른 표기 (쉼표로 구분)', type: 'list', hint: '청구서 시트 이름, 계산서 표기 등' },
         ]}
         onSave={async (id, d) => {
@@ -189,6 +224,7 @@ export default function Vendors() {
           },
         }}
       />
+      {info && <VendorInfoModal v={vendors.data.find((x) => x.id === info.id) ?? info} acc={accountOf(info.id)} onClose={() => setInfo(null)} />}
       <Modal
         open={!!issued}
         title="업체 포털 접속코드"
@@ -225,5 +261,84 @@ export default function Vendors() {
         )}
       </Modal>
     </div>
+  );
+}
+
+/** 업체 정보 보기 (업체가 포털에서 입력한 내용 포함) */
+function VendorInfoModal({ v, acc, onClose }: { v: Vendor; acc?: VendorAccount; onClose: () => void }) {
+  const toast = useToast();
+  const rows: [string, string | undefined][] = [
+    ['업체명', v.name],
+    ['대표자', v.ceoName],
+    ['사업자등록번호', v.bizNo],
+    ['주소', v.address],
+    ['전화', v.phone],
+    ['팩스', v.fax],
+    ['이메일', v.email],
+    ['담당자', v.contactName],
+    ['담당자 휴대폰', v.mobile],
+    ['업체 안내', v.vendorNote],
+    ['다른 표기', (v.aliases ?? []).join(', ')],
+    ['업체 포털', acc ? `업체코드 ${acc.code}` : '미발급'],
+  ];
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(rows.filter(([, x]) => x).map(([k, x]) => `${k}: ${x}`).join('\n'));
+      toast('업체 정보를 복사했습니다.');
+    } catch {
+      toast('복사에 실패했습니다.', 'err');
+    }
+  };
+  return (
+    <Modal
+      open
+      title={`업체 정보 · ${v.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="mr-auto self-center text-[12px] text-muted">고칠 때는 목록에서 업체를 골라 '수정'을 누르세요.</span>
+          <button className="btn-ghost" onClick={copy}>
+            복사
+          </button>
+          <button className="btn-primary" onClick={onClose}>
+            닫기
+          </button>
+        </>
+      }
+    >
+      <div className="mb-2 text-[12px]">
+        {v.vendorUpdatedAt ? (
+          <span className="chip bg-sky-50 text-sky-700">업체가 포털에서 마지막으로 고친 때: {new Date(v.vendorUpdatedAt).toLocaleString('ko-KR')}</span>
+        ) : (
+          <span className="text-muted">업체가 포털에서 고친 적은 없습니다.</span>
+        )}
+      </div>
+      <table className="tbl text-[13px]">
+        <tbody>
+          {rows.map(([k, x]) => (
+            <tr key={k}>
+              <th className="w-32 whitespace-nowrap bg-canvas text-left">{k}</th>
+              <td className="whitespace-pre-wrap">
+                {k === '전화' || k === '담당자 휴대폰' ? (
+                  x ? (
+                    <a className="text-sky-700 underline" href={`tel:${x}`}>
+                      {x}
+                    </a>
+                  ) : (
+                    <span className="text-muted">-</span>
+                  )
+                ) : k === '이메일' && x ? (
+                  <a className="text-sky-700 underline" href={`mailto:${x}`}>
+                    {x}
+                  </a>
+                ) : (
+                  x || <span className="text-muted">-</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Modal>
   );
 }
