@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
 import { refreshCatalog } from '../lib/itemCatalog';
-import { orderBy, where } from 'firebase/firestore';
+import { orderBy } from 'firebase/firestore';
 import { readWorkbook, parseInvoiceWorkbook, type ParsedInvoiceFile } from '../lib/parsers';
 import { audit, commitBatch, fetchWhere, newId, useCollection, useSettings } from '../lib/db';
 import { C } from '../lib/firebase';
@@ -59,11 +59,10 @@ export default function Invoices() {
   const [files, setFiles] = useState<FileState[]>([]);
   const [busy, setBusy] = useState(false);
   const [filterMonth, setFilterMonth] = useState('');
-  const invoices = useCollection<Invoice>(
-    C.invoices,
-    filterMonth ? [where('month', '==', filterMonth)] : [orderBy('uploadedAt', 'desc')],
-    filterMonth,
-  );
+  const [filterSite, setFilterSite] = useState('');
+  const [filterVendor, setFilterVendor] = useState('');
+  const [sortBy, setSortBy] = useState<'old' | 'new' | 'upload'>('old');
+  const invoices = useCollection<Invoice>(C.invoices, [orderBy('uploadedAt', 'desc')]);
   const [detail, setDetail] = useState<Invoice | null>(null);
 
   const catsOf = (siteId: string) => cats.data.filter((c) => c.siteId === siteId).sort((a, b) => a.order - b.order);
@@ -294,11 +293,16 @@ export default function Invoices() {
   const catName = (id?: string) => cats.data.find((c) => c.id === id)?.name;
   const unmappedCount = (inv: Invoice) => inv.lines.filter((l) => !l.siteCategoryId).length;
 
-  const months = useMemo(() => {
-    const s = new Set(invoices.data.map((i) => i.month));
-    if (filterMonth) s.add(filterMonth);
-    return [...s].sort().reverse();
-  }, [invoices.data, filterMonth]);
+  const months = useMemo(() => [...new Set(invoices.data.map((i) => i.month))].sort(), [invoices.data]);
+  const invSites = useMemo(() => [...new Set(invoices.data.map((i) => i.siteId))].map((id) => [id, siteName(id)] as const).sort((a, b) => a[1].localeCompare(b[1], 'ko')), [invoices.data, sites.data]);
+  const invVendors = useMemo(() => [...new Map(invoices.data.map((i) => [i.vendorId, i.vendorName])).entries()].sort((a, b) => a[1].localeCompare(b[1], 'ko')), [invoices.data]);
+  const shown = useMemo(() => {
+    const l = invoices.data.filter((i) => (!filterMonth || i.month === filterMonth) && (!filterSite || i.siteId === filterSite) && (!filterVendor || i.vendorId === filterVendor));
+    const tie = (a: Invoice, b: Invoice) => siteName(a.siteId).localeCompare(siteName(b.siteId), 'ko') || a.vendorName.localeCompare(b.vendorName, 'ko');
+    if (sortBy === 'upload') return l;
+    return [...l].sort((a, b) => (sortBy === 'old' ? a.month.localeCompare(b.month) : b.month.localeCompare(a.month)) || tie(a, b));
+  }, [invoices.data, filterMonth, filterSite, filterVendor, sortBy, sites.data]);
+  const shownTotal = shown.reduce((a, i) => a + (i.totalAmount || 0), 0);
 
   return (
     <div>
@@ -560,15 +564,46 @@ export default function Invoices() {
       <div className="card overflow-hidden">
         <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
           <span className="font-semibold">저장된 계산서</span>
-          <select className="input ml-auto h-7" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
-            <option value="">최근 업로드순</option>
-            {months.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
+          <span className="text-[12px] text-muted">
+            {shown.length}건 · {won(shownTotal)}원
+          </span>
+          <div className="ml-auto flex flex-wrap gap-1.5">
+            <select className="input h-7 w-40" value={filterSite} onChange={(e) => setFilterSite(e.target.value)}>
+              <option value="">전체 현장</option>
+              {invSites.map(([id, n]) => (
+                <option key={id} value={id}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <select className="input h-7 w-40" value={filterVendor} onChange={(e) => setFilterVendor(e.target.value)}>
+              <option value="">전체 업체</option>
+              {invVendors.map(([id, n]) => (
+                <option key={id} value={id}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <select className="input h-7 w-28" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+              <option value="">전체 월</option>
+              {months.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+            <select className="input h-7 w-32" value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}>
+              <option value="old">오래된 월부터</option>
+              <option value="new">최신 월부터</option>
+              <option value="upload">최근 올린 순</option>
+            </select>
+            {(filterSite || filterVendor || filterMonth) && (
+              <button className="btn-ghost h-7 text-[12px]" onClick={() => (setFilterSite(''), setFilterVendor(''), setFilterMonth(''))}>
+                초기화
+              </button>
+            )}
+          </div>
         </div>
-        {invoices.data.length === 0 ? (
-          <Empty>{invoices.loading ? '불러오는 중…' : '저장된 계산서가 없습니다.'}</Empty>
+        {shown.length === 0 ? (
+          <Empty>{invoices.loading ? '불러오는 중…' : invoices.data.length ? '조건에 맞는 계산서가 없습니다.' : '저장된 계산서가 없습니다.'}</Empty>
         ) : (
           <div className="max-h-[560px] overflow-y-auto">
             <table className="tbl">
@@ -587,7 +622,7 @@ export default function Invoices() {
                 </tr>
               </thead>
               <tbody>
-                {invoices.data.map((inv) => (
+                {shown.map((inv) => (
                   <tr key={inv.id}>
                     <td>{inv.month}</td>
                     <td>{inv.vendorName}</td>
