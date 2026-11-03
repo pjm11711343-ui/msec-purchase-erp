@@ -707,6 +707,53 @@ export default function ReqEdit() {
   };
   const catName = (cid?: string) => cats.data.find((c) => c.id === cid)?.name;
 
+  /**
+   * 드롭다운 칸 붙여넣기 (품명·규격·거래선·분류)
+   *  - 한 칸이면 그 줄, 여러 줄이면 아래 줄로 차례로 (줄이 모자라면 줄 추가)
+   *  - 품명 칸에 '품명 ⇥ 규격' 2칸을 붙여넣으면 규격까지 같이
+   *  - 목록에 없는 값은 건너뛴다 (발주된 줄도 건너뜀)
+   */
+  const pasteDown = (startKey: string, col: 'item' | 'spec' | 'vendor' | 'cat', rows: string[][]) => {
+    const start = d.lines.findIndex((l) => l.key === startKey);
+    if (start < 0 || !rows.length) return;
+    const find = (opts: string[], v: string) => (v ? opts.find((o) => nameKey(o) === nameKey(v)) : undefined);
+    const lines = [...d.lines];
+    const touched: string[] = [];
+    let ok = 0;
+    let skip = 0;
+    rows.forEach((cells, i) => {
+      const idx = start + i;
+      if (idx >= lines.length) lines.push(newLine());
+      const l = lines[idx];
+      const a = cells[0] ?? '';
+      const b = cells[1] ?? '';
+      if (isLocked(l) || (!a && !(col === 'item' && b))) return void (a && skip++);
+      if (col === 'item' || col === 'spec') {
+        const item = col === 'item' ? find(itemOptions, a) : l.itemName;
+        if (!item) return void skip++;
+        const specIn = col === 'item' ? b : a;
+        const spec = specIn ? find(specOptions(item), specIn) : col === 'item' && l.spec && specOk(item, l.spec) ? l.spec : '';
+        if (col === 'spec' && !spec) return void skip++;
+        if (specIn && !spec) skip++;
+        const us = spec ? unitsOf(item, spec) : undefined;
+        lines[idx] = { ...l, itemName: item, spec: spec ?? '', aliasHit: undefined, ...(us?.size === 1 ? { unit: [...us][0] } : {}), ...resetAuto(l) };
+        touched.push(l.key);
+      } else if (col === 'vendor') {
+        const v = vendorOptions.find((x) => nameKey(x.name) === nameKey(a) || nameKey(vLabel(x)) === nameKey(a) || x.aliases?.some((al) => nameKey(al) === nameKey(a)));
+        if (!v && a !== NONE) return void skip++;
+        lines[idx] = { ...l, vendorId: v?.id, vendorName: v?.name };
+      } else {
+        const c = siteCats.find((x) => nameKey(x.name) === nameKey(a));
+        if (!c && a !== NONE) return void skip++;
+        lines[idx] = { ...l, siteCategoryId: c?.id, catAuto: undefined };
+      }
+      ok++;
+    });
+    setD((x) => x && { ...x, lines });
+    touched.forEach((k) => autoPrice(k));
+    if (rows.length > 1 || skip) toast(`${ok}칸 붙여넣었습니다.${skip ? ` 목록에 없는 ${skip}칸은 건너뛰었습니다 (빨간 칸이 없게 목록 값으로 붙여넣으세요).` : ''}`, skip ? 'err' : undefined);
+  };
+
   /** 회사 청구서 양식(엑셀)으로 내려받기 */
   const downloadForm = async () => {
     try {
@@ -720,7 +767,7 @@ export default function ReqEdit() {
       const sumX = reqSummary(req, cats.data, reqs.data, pos.data);
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(tpl);
-      const { truncated } = fillReqForm(wb, req, sumX, logo, signs.byId);
+      const { truncated } = fillReqForm(wb, req, sumX, logo, signs.byId, new Map(cats.data.map((c) => [c.id, c.name])));
       const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1310,6 +1357,7 @@ export default function ReqEdit() {
                             invalid={!!l.itemName && !itemSet.has(normItem(l.itemName))}
                             placeholder="품명 선택 ▾"
                             onPick={(v) => pickItem(l.key, v)}
+                            onPasteRows={(rows) => pasteDown(l.key, 'item', rows)}
                           />
                         ) : (
                           <span className="break-words">{l.itemName}</span>
@@ -1359,6 +1407,7 @@ export default function ReqEdit() {
                             invalid={!!l.spec && !specOk(l.itemName, l.spec)}
                             placeholder={l.itemName ? '규격 ▾' : '품명 먼저'}
                             onPick={(v) => pickSpec(l.key, l.itemName, v)}
+                            onPasteRows={(rows) => pasteDown(l.key, 'spec', rows)}
                           />
                         ) : (
                           <span className="break-words">{l.spec}</span>
@@ -1406,6 +1455,7 @@ export default function ReqEdit() {
                             options={vendorLabels}
                             placeholder="거래선 ▾"
                             onPick={(label) => pickVendor(l.key, label)}
+                            onPasteRows={(rows) => pasteDown(l.key, 'vendor', rows)}
                           />
                         ) : (
                           <span className="break-words">{l.vendorName}</span>
@@ -1423,6 +1473,7 @@ export default function ReqEdit() {
                             options={catLabels}
                             placeholder="분류 ▾"
                             onPick={(label) => pickCat(l.key, label)}
+                            onPasteRows={(rows) => pasteDown(l.key, 'cat', rows)}
                           />
                         ) : (
                           catName(l.siteCategoryId)

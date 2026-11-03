@@ -13,6 +13,7 @@ export default function PickInput({
   className = '',
   placeholder = '선택 ▾',
   invalid,
+  onPasteRows,
 }: {
   value: string;
   options: string[];
@@ -20,6 +21,8 @@ export default function PickInput({
   className?: string;
   placeholder?: string;
   invalid?: boolean;
+  /** 붙여넣기(Ctrl+V): 엑셀에서 여러 줄·여러 칸을 복사해 와도 받는다 (줄 → 칸 배열) */
+  onPasteRows?: (rows: string[][]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -80,6 +83,32 @@ export default function PickInput({
           else if (e.key === 'ArrowUp') (e.preventDefault(), setHi((h) => Math.max(h - 1, 0)));
           else if (e.key === 'Enter' && list[hi]) (e.preventDefault(), pick(list[hi]));
           else if (e.key === 'Escape') (setOpen(false), ref.current?.blur());
+        }}
+        onCopy={(e) => {
+          // 칸을 눌러 목록이 열려 있으면 입력칸이 비어 보이므로, 고른 값을 그대로 복사
+          const el = e.currentTarget;
+          if (value && (!q || el.selectionStart === el.selectionEnd)) {
+            e.preventDefault();
+            e.clipboardData.setData('text/plain', value);
+          }
+        }}
+        onPaste={(e) => {
+          const text = e.clipboardData.getData('text/plain');
+          if (!text) return;
+          e.preventDefault();
+          const rows = text
+            .replace(/\r/g, '')
+            .split('\n')
+            .map((r) => r.split('\t').map((c) => c.trim()))
+            .filter((r, i, a) => !(i === a.length - 1 && r.every((c) => !c)));
+          if (onPasteRows) onPasteRows(rows);
+          else {
+            const exact = options.find((o) => nameKey(o) === nameKey(rows[0]?.[0] ?? ''));
+            if (exact) onPick(exact);
+          }
+          setOpen(false);
+          setQ('');
+          ref.current?.blur();
         }}
         onBlur={() => {
           // 친 글자가 목록 값과 정확히 같으면 그 값으로, 아니면 원래 값 유지

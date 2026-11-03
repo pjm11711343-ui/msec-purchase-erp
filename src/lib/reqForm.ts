@@ -73,7 +73,7 @@ const md = (t?: number) => {
 };
 
 /** 양식 워크북에 청구서 내용을 채운다 (워크북을 그대로 고쳐 쓴다) */
-export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSummary, logo?: ArrayBuffer, signs?: Map<string, string>): { truncated: number } {
+export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSummary, logo?: ArrayBuffer, signs?: Map<string, string>, catNames?: Map<string, string>): { truncated: number } {
   const ws = wb.getWorksheet('청구서') ?? wb.worksheets[0];
   if (logo) {
     // 회사 로고 (양식 왼쪽 위)
@@ -110,7 +110,11 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     set(`G${r}`, n(l.execQty));
     set(`H${r}`, n(l.priorQty));
     set(`I${r}`, n(l.reqQty));
-    set(`J${r}`, bonNote(l) || null);
+    // 본/(비고): 프로그램 자재분류를 앞에 → "배관자재 / 3본 (절단)"
+    const cat = l.siteCategoryId ? catNames?.get(l.siteCategoryId) : undefined;
+    const jv = [cat, bonNote(l)].filter(Boolean).join(' / ');
+    set(`J${r}`, jv || null);
+    if (jv.length > 6) ws.getCell(`J${r}`).alignment = { ...(ws.getCell(`J${r}`).alignment ?? {}), wrapText: true, shrinkToFit: false, vertical: 'middle', horizontal: 'center' };
     set(`K${r}`, n(l.orderQty || l.reqQty));
     set(`N${r}`, n(l.orderPrice));
     set(`P${r}`, n(amt(l)));
