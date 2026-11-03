@@ -15,6 +15,8 @@ import { boxLabel, isSiteStepLabel } from './approvalTemplates';
 import { NO_VENDOR, type ReqSummary, type SumRow } from './reqSummary';
 
 // 7행은 사용 위치·공정 제목 줄 → 품목은 8~20행(1쪽 13줄), 이어서 35~188행
+/** 이어지는 쪽(35행~) 한 쪽에 들어가는 품목 줄 수 (A4 가로·73% 기준, 1~6행 제목 반복 포함) */
+export const PAGE_ROWS = 23;
 export const ITEM_ROWS = [...Array.from({ length: 13 }, (_, i) => 8 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
 
 
@@ -84,6 +86,7 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   const date = new Date(`${req.requestDate}T00:00:00Z`);
 
   set('U2', req.siteName);
+  ws.getCell('U2').font = { ...(ws.getCell('U2').font ?? {}), size: 14 };
   set('B4', `현장명 : ${req.siteName}  현장`);
   set('O4', isNaN(date.getTime()) ? req.requestDate : date);
   set('S4', req.docNo || null);
@@ -191,10 +194,16 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
   set('B32', { formula: '+$O$4', result: isNaN(date.getTime()) ? undefined : date } as ExcelJS.CellFormulaValue);
   set('I32', { formula: 'SUM(P6:Q188)', result: total } as ExcelJS.CellFormulaValue);
 
-  // 인쇄 범위: 쓴 줄까지만 (빈 쪽이 인쇄되지 않게)
-  const extra = Math.max(0, lines.length - 13);
-  const last = extra ? 34 + extra : 32;
-  ws.pageSetup.printArea = `A1:X${last}`;
+  // 인쇄 범위: 1쪽 = A1:X34. 품목이 13줄을 넘으면 35행부터 한 쪽에 PAGE_ROWS줄씩 2쪽·3쪽…으로 나눠 인쇄
+  //   (이어지는 쪽에도 1~6행 제목이 반복되고, 쪽마다 칸이 끝까지 그려지도록 쪽 끝까지 범위를 잡는다)
+  const extra = Math.max(0, Math.min(lines.length, ITEM_ROWS.length) - 13);
+  const pages = Math.ceil(extra / PAGE_ROWS);
+  const last = pages ? Math.min(188, 34 + pages * PAGE_ROWS) : 34;
+  ws.getRow(34).addPageBreak();
+  for (let p = 1; p < pages; p++) ws.getRow(34 + p * PAGE_ROWS).addPageBreak();
+  ws.pageSetup.printArea = `A$1:X$${last}`; // ExcelJS가 열 앞에 $를 붙여 $A$1:$X$n (절대 주소)로 저장 — 상대 주소면 일부 프로그램이 인쇄 범위를 무시
+  ws.pageSetup.printTitlesRow = '1:6';
+  ws.pageSetup.fitToPage = false;
   wb.calcProperties = { ...(wb.calcProperties ?? {}), fullCalcOnLoad: true };
   return { truncated: Math.max(0, lines.length - ITEM_ROWS.length) };
 }
