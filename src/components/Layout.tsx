@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { C, db } from '../lib/firebase';
-import { EXEC_MENUS, execMenuOf } from '../types';
+import { EXEC_MENUS, execMenuOf, MENU_ROLES, roleMenusOf, type Settings } from '../types';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL, type Role } from '../types';
 import { usePurchaseOrders } from '../lib/pos';
@@ -75,16 +75,17 @@ export default function Layout() {
   // 폰·태블릿 세로: 메뉴는 ☰로 여닫는 서랍 / PC: 왼쪽 고정 (접기 가능)
   const [open, setOpen] = useState(false);
   // 결재자(대표·사장): 관리자가 허용한 메뉴만 (설정 › 결재자 화면에 보일 메뉴)
-  const isExec = role === 'executive';
+  // 결재자·현장소장·현장담당: 관리자가 허용한 메뉴만
+  const isExec = !!role && MENU_ROLES.includes(role);
   const [execMenus, setExecMenus] = useState<string[] | null | undefined>(undefined); // undefined = 읽는 중, null = 제한 없음
   useEffect(() => {
     if (!isExec) return;
     return onSnapshot(
       doc(db, C.settings, 'main'),
-      (d) => setExecMenus((d.data()?.execMenus as string[] | undefined) ?? null),
+      (d) => setExecMenus(roleMenusOf(d.data() as Partial<Settings> | undefined, role!)),
       () => setExecMenus(null),
     );
-  }, [isExec]);
+  }, [isExec, role]);
   // 개인별 설정(대표이사·사장 따로)이 있으면 그것, 없으면 공통값
   const myMenus = profile?.menus ?? execMenus;
   const execAllowed = (to: string) => !isExec || !myMenus || !EXEC_MENUS.some((m) => m.to === to) || myMenus.includes(to);

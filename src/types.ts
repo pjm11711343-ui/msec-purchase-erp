@@ -151,7 +151,15 @@ export interface Settings {
   priceTolerance: number; // 단가 허용 오차(원)
   siteCodePrefix: string; // 현장코드 접두어 (예: MS)
   execMenus?: string[]; // 결재자(대표·사장)에게 보여 줄 메뉴 주소 (없으면 전부)
+  roleMenus?: Partial<Record<Role, string[]>>; // 현장소장·현장담당 공통 메뉴 (없으면 전부)
 }
+
+/** 관리자가 메뉴를 정해 줄 수 있는 역할 */
+export const MENU_ROLES: Role[] = ['executive', 'siteManager', 'siteStaff'];
+/** 역할에 원래 열려 있는 메뉴 (월별 품목은 결재자만) */
+export const menusForRole = (role: Role) => EXEC_MENUS.filter((m) => m.to !== '/items' || role === 'executive');
+/** 역할의 공통 메뉴 설정 (없으면 null = 전부) */
+export const roleMenusOf = (s: Partial<Settings> | undefined, role: Role): string[] | null => (role === 'executive' ? s?.execMenus : s?.roleMenus?.[role]) ?? null;
 
 /** 결재자(대표·사장) 화면에서 관리자가 켜고 끌 수 있는 메뉴 */
 export const EXEC_MENUS: { to: string; label: string; group: string }[] = [
