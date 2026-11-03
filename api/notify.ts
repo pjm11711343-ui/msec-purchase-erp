@@ -5,6 +5,7 @@
 //  po_ack        업체 발주 확인 → 자재부 텔레그램                            (업체)
 //  receipt       입고 등록 → 현장 단톡방                                    (업체·사내)
 //  approval_turn 청구서 결재 차례 → 결재자 개인 텔레그램                      (사내)
+//  delivery_plan 업체 납품 일정 → 현장 단톡방 + 자재부 텔레그램              (업체·자재부)
 //  rfq_sent      견적 의뢰 → 업체 메일(의뢰서 PDF·포털 링크)                 (자재부·관리자)
 import { esc, fail, getDoc, HttpError, sendMail, sendTelegram, verifyUser, type Res } from './_lib/common.js';
 
@@ -116,6 +117,26 @@ export default async function handler(req: Req, res: Res) {
         `🚚 <b>입고 등록</b> ${esc(po.siteName)}\n${esc(po.vendorName)} · ${esc(po.poNo)}\n${date ? `입고일 ${esc(date)} · ` : ''}${n ? `${n}줄` : ''}\n입력: ${esc(who)}\n현장에서 입고 확인 부탁드립니다: ${origin}/receipt`,
       );
       return res.status(200).json({ ok: true, telegram: sent });
+    }
+
+    if (event === 'delivery_plan') {
+      const po = await loadPo() as Po & { deliveries?: { id: string; date: string; time?: string; vehicle?: string; driverName?: string; driverPhone?: string; note?: string }[] };
+      const d = po.deliveries?.find((x) => x.id === String(body.deliveryId ?? ''));
+      if (!d) throw new HttpError(404, '납품 일정을 찾을 수 없습니다.');
+      const s = await site(po.siteId);
+      const msg = [
+        `🚛 <b>납품 예정</b> ${esc(po.siteName)}`,
+        `${esc(po.vendorName)} · ${esc(po.poNo)}`,
+        `📅 ${esc(d.date)}${d.time ? ` ${esc(d.time)}` : ''}`,
+        d.vehicle ? `차량 ${esc(d.vehicle)}` : '',
+        d.driverName || d.driverPhone ? `기사 ${esc(d.driverName ?? '')} ${esc(d.driverPhone ?? '')}` : '',
+        d.note ? `요청 ${esc(d.note)}` : '',
+        esc(lineText(po.lines, 5)),
+        `알림: ${esc(who)}`,
+      ].filter(Boolean).join('\n');
+      const tSite = await sendTelegram(s?.telegramChatId, msg);
+      const tOffice = await sendTelegram(process.env.TELEGRAM_OFFICE_CHAT_ID, msg);
+      return res.status(200).json({ ok: true, telegram: tSite, office: tOffice });
     }
 
     if (event === 'approval_turn') {

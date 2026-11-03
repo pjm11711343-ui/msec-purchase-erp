@@ -12,6 +12,9 @@ import VendorRfq from './VendorRfq';
 import VendorInfo from './VendorInfo';
 import { useVendorRfqs } from '../../lib/rfq';
 import { Empty, errMsg, RateBar, useToast } from '../../components/ui';
+import { useVendorNotices } from '../../lib/notices';
+import VendorNotices, { markNoticeRead, NoticeBanner } from './VendorNotices';
+import DeliveryPanel from '../../components/DeliveryPanel';
 import { MIN_ROWS, PoSheet, signBoxes } from '../po/PoDetail';
 import type { Invoice, Site } from '../../types';
 
@@ -26,7 +29,10 @@ export default function VendorPortal() {
   const [view, setView] = useState<'receipt' | 'sheet'>('receipt');
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const [siteF, setSiteF] = useState(''); // 현장별 보기 ('' = 전체, 현장별로 묶어서)
-  const [page, setPage] = useState<'po' | 'statement' | 'rfq' | 'info'>('po');
+  const [page, setPage] = useState<'po' | 'statement' | 'rfq' | 'notice' | 'info'>('po');
+  const nt = useVendorNotices(vendor?.vendorId);
+  const [noticeOpen, setNoticeOpen] = useState<string | null>(null);
+  const unreadNotice = nt.list.filter((n) => !nt.readSet.has(n.id)).length;
   const vr = useVendorRfqs(vendor?.vendorId);
   const newRfq = vr.rfqs.data.filter((r) => r.status === 'sent' && !vr.quotes.data.some((q) => q.rfqId === r.id && q.status === 'submitted')).length;
   const rec = useMemo(() => receivedMap(receipts.data), [receipts.data]);
@@ -84,15 +90,29 @@ export default function VendorPortal() {
       </header>
       <div className="mx-auto max-w-[1280px] p-2.5 sm:p-5">
         <div className="no-print mb-4 grid grid-cols-2 gap-1 sm:flex">
-          {(['po', 'statement', 'rfq', 'info'] as const).map((t) => (
+          {(['po', 'statement', 'rfq', 'notice', 'info'] as const).map((t) => (
             <button key={t} className={`rounded-md px-4 py-1.5 text-[13px] font-semibold ${page === t ? 'bg-navy-950 text-white' : 'bg-white text-muted hover:text-ink'}`} onClick={() => (setPage(t), setOpen(null))}>
-              {t === 'po' ? '발주서 · 입고' : t === 'statement' ? '거래명세서' : t === 'rfq' ? '견적 요청' : '업체 정보'}
+              {t === 'po' ? '발주서 · 입고' : t === 'statement' ? '거래명세서' : t === 'rfq' ? '견적 요청' : t === 'notice' ? '공지' : '업체 정보'}
+              {t === 'notice' && unreadNotice > 0 && <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[11px] text-white">{unreadNotice}</span>}
               {t === 'rfq' && newRfq > 0 && <span className="ml-1.5 rounded-full bg-amber-brand px-1.5 text-[11px] text-navy-950">{newRfq}</span>}
             </button>
           ))}
         </div>
+        {page !== 'notice' && (
+          <NoticeBanner
+            list={nt.list}
+            readSet={nt.readSet}
+            onOpen={(n) => {
+              setNoticeOpen(n.id);
+              setPage('notice');
+              if (vendor) void markNoticeRead(n, vendor.vendorId, vendor.vendorName);
+            }}
+          />
+        )}
         {page === 'statement' ? (
           <VendorStatement />
+        ) : page === 'notice' ? (
+          <VendorNotices key={noticeOpen ?? ''} list={nt.list} readSet={nt.readSet} vendorId={vendor?.vendorId ?? ''} vendorName={vendor?.vendorName ?? ''} openId={noticeOpen} />
         ) : page === 'rfq' ? (
           <VendorRfq />
         ) : page === 'info' ? (
@@ -247,6 +267,11 @@ export default function VendorPortal() {
                 )}
               </div>
             </div>
+            {cur.status !== 'cancelled' && (
+              <div className="no-print">
+                <DeliveryPanel po={cur} canEdit who={vendor?.vendorName ?? '업체'} />
+              </div>
+            )}
             {view === 'receipt' ? (
               <div className="card overflow-hidden">
                 <ReceiptPanel po={cur} receipts={receipts.data} prices={pos.prices} billed={billed} />

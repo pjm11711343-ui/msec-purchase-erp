@@ -327,7 +327,22 @@ export interface PurchaseOrder {
   cancelledAt?: number;
   ackAt?: number; // 업체 발주 확인
   ackBy?: string;
+  deliveries?: DeliveryPlan[]; // 업체가 알린 납품 일정 (차량·기사)
   history: { at: number; by: string; action: string }[];
+}
+
+/** 업체가 알리는 납품 일정 */
+export interface DeliveryPlan {
+  id: string;
+  date: string; // YYYY-MM-DD
+  time?: string; // 예: 09:00, 오전
+  vehicle?: string; // 차량 (예: 5톤 카고, 12가3456)
+  driverName?: string;
+  driverPhone?: string;
+  note?: string; // 하차 장비·인원 요청 등
+  by: string; // 업체명 또는 입력한 사람
+  at: number;
+  done?: boolean; // 납품 완료 표시
 }
 
 /* ───────── 4단계: 업체 포털 · 입고 ───────── */
@@ -365,4 +380,26 @@ export interface Receipt {
   confirmedByName?: string;
   confirmedAt?: number;
   createdAt: number;
+}
+
+/** 업체 공지사항 (자재부 → 업체 포털) */
+export interface Notice {
+  id: string;
+  title: string;
+  body: string;
+  toAll: boolean; // 전체 업체
+  vendorIds: string[]; // toAll=false 일 때 받는 업체
+  pinned?: boolean; // 위에 고정
+  important?: boolean; // 중요 (포털 상단 배너)
+  createdAt: number;
+  updatedAt?: number;
+  byName: string;
+}
+/** 업체 공지 읽음 (id = 공지id_업체id) */
+export interface NoticeRead {
+  id: string;
+  noticeId: string;
+  vendorId: string;
+  vendorName: string;
+  at: number;
 }

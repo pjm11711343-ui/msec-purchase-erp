@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import DeliveryPanel from '../../components/DeliveryPanel';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch } from '../../lib/db';
 import { C } from '../../lib/firebase';
@@ -408,6 +409,12 @@ export default function PoDetail() {
           </div>
         );
       })()}
+
+      {(isOffice || (po.deliveries?.length ?? 0) > 0) && (
+        <div className="no-print">
+          <DeliveryPanel po={po} canEdit={isOffice} who={profile?.name ?? ''} />
+        </div>
+      )}
 
       <PoSheet
         po={po}

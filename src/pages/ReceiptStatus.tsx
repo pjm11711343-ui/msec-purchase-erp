@@ -33,6 +33,15 @@ export default function ReceiptStatus() {
       .filter(({ p, prog }) => (!siteF || p.siteId === siteF) && (!stF || prog.state === stF) && (!k || [p.poNo, p.vendorName, p.siteName, ...p.lines.map((l) => l.itemName)].join(' ').toLowerCase().includes(k)));
   }, [pos.data, rec, receipts.data, siteF, stF, q]);
 
+  const todayStr = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const upcoming = useMemo(
+    () =>
+      pos.data
+        .filter((p) => p.status !== 'cancelled' && (!siteF || p.siteId === siteF))
+        .flatMap((p) => (p.deliveries ?? []).filter((d) => !d.done && d.date >= todayStr).map((d) => ({ p, d })))
+        .sort((a, b) => a.d.date.localeCompare(b.d.date) || (a.d.time ?? '').localeCompare(b.d.time ?? '')),
+    [pos.data, siteF, todayStr],
+  );
   const count = (s: St) => pos.data.filter((p) => p.status !== 'cancelled' && poProgress(p, rec).state === s).length;
   const log = receipts.data.filter((r) => !siteF || r.siteId === siteF);
 
@@ -53,6 +62,32 @@ export default function ReceiptStatus() {
         <Stat label="입고 완료" value={`${count('입고완료')}건`} />
         <Stat label="현장 미확인 입고" value={`${receipts.data.filter((r) => !r.confirmed).length}건`} />
       </div>
+      {upcoming.length > 0 && (
+        <div className="card mb-4 overflow-hidden">
+          <div className="border-b border-line px-4 py-2.5 font-semibold">
+            🚛 납품 예정 <span className="text-[12px] font-normal text-muted">업체가 알린 일정 · {upcoming.length}건</span>
+          </div>
+          <div className="divide-y divide-line">
+            {upcoming.slice(0, 30).map(({ p, d }) => (
+              <Link key={p.id + d.id} to={`/po/${p.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-0.5 px-4 py-2 text-[12.5px] hover:bg-canvas">
+                <span className={`w-32 font-bold ${d.date === todayStr ? 'text-amber-700' : ''}`}>
+                  {d.date === todayStr ? '오늘' : d.date.slice(5)} {d.time}
+                </span>
+                <span className="font-medium">{p.siteName}</span>
+                <span>{p.vendorName}</span>
+                <span className="text-muted">{p.poNo}</span>
+                {d.vehicle && <span>🚚 {d.vehicle}</span>}
+                {(d.driverName || d.driverPhone) && (
+                  <span>
+                    기사 {d.driverName} {d.driverPhone}
+                  </span>
+                )}
+                {d.note && <span className="text-muted">요청: {d.note}</span>}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="card overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
           {(['po', 'log'] as const).map((t) => (

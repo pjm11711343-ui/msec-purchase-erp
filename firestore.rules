@@ -106,7 +106,7 @@ service cloud.firestore {
       allow create, delete: if isOffice();
       allow update: if isOffice()
         || (isVendor() && resource.data.vendorId == myVendor()
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ackAt', 'ackBy']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ackAt', 'ackBy', 'deliveries']));
     }
     match /erp_receipts/{id} {
       allow read: if canRead(resource.data.siteId) || (isVendor() && resource.data.vendorId == myVendor());
@@ -187,6 +187,17 @@ service cloud.firestore {
     match /erp_rfqs/{id} {
       allow read: if isOffice() || (isVendor() && myVendor() in resource.data.vendorIds);
       allow write: if isOffice();
+    }
+    // 업체 공지사항: 자재부가 쓰고, 업체는 전체 공지와 자기 업체 지정 공지만 읽는다
+    match /erp_notices/{id} {
+      allow read: if isOffice() || (isVendor() && (resource.data.toAll == true || myVendor() in resource.data.vendorIds));
+      allow write: if isOffice();
+    }
+    match /erp_noticeReads/{id} {
+      allow read: if isOffice() || (isVendor() && resource.data.vendorId == myVendor());
+      allow create, update: if isVendor() && request.resource.data.vendorId == myVendor()
+        && id == request.resource.data.noticeId + '_' + myVendor();
+      allow delete: if isOffice();
     }
     match /erp_rfqQuotes/{id} {
       allow read: if isOffice() || (isVendor() && resource.data.vendorId == myVendor());
