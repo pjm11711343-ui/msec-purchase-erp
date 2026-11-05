@@ -15,6 +15,7 @@ import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import ReqImportModal from './ReqImportModal';
+import { dropKept, readKept, useReqKeeper } from '../../lib/reqKeeper';
 import HhRatesEditor from '../../components/HhRatesEditor';
 import { hhPerOf, hhRuleFor, isHhLine, useHhRates } from '../../lib/hh';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
@@ -77,12 +78,27 @@ export default function ReqEdit() {
   const stored = reqs.data.find((r) => r.id === id) ?? reqs.trash.find((r) => r.id === id);
   const inTrash = !!stored?.deletedAt;
   const isOffice = can('admin', 'material');
+  // 작성 보관(다른 화면에 갔다 와도 유지)·되돌리기
+  const keepActive = !!d && !readOnly && !inTrash && ['draft', 'rejected', 'pending'].includes(d.status);
+  const keeper = useReqKeeper<Draft>(d, setD as (v: Draft) => void, profile?.id, keepActive);
+  const [restored, setRestored] = useState<{ at: number; offer?: Draft } | null>(null);
 
   // 처음 불러오기
   useEffect(() => {
     if (d) return;
     if (isNew) {
       if (!profile || sites.loading) return;
+      // 저장 안 하고 나갔던 새 청구서가 있으면 이어서 (공정 보드 등에서 현장·공정을 정해 들어왔으면 고를 수 있게)
+      const kept = readKept<Draft>(profile.id);
+      if (kept?.d && !kept.d.id && kept.d.lines?.some((l) => l.itemName)) {
+        if (!qs.get('site') && !qs.get('zone')) {
+          setD(kept.d);
+          keeper.markDirty();
+          setRestored({ at: kept.at });
+          return;
+        }
+        setRestored({ at: kept.at, offer: kept.d });
+      }
       const qSite = sites.data.find((s) => s.id === qs.get('site'));
       const siteId = qSite?.id ?? sites.data[0]?.id ?? '';
       setD({
@@ -103,8 +119,37 @@ export default function ReqEdit() {
         updatedAt: Date.now(),
         history: [],
       });
-    } else if (stored) setD(structuredClone(stored));
+    } else if (stored) {
+      // 저장 안 한 고친 내용이 이 브라우저에 있으면(서버 저장본보다 나중) 이어서
+      const kept = readKept<Draft>(profile?.id, stored.id);
+      if (kept?.d && kept.at > (stored.updatedAt ?? 0) && kept.d.status === stored.status) {
+        setD(kept.d);
+        keeper.markDirty();
+        setRestored({ at: kept.at });
+      } else {
+        if (kept) dropKept(profile?.id, stored.id);
+        setD(structuredClone(stored));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, stored, profile, sites.loading, sites.data, d]);
+
+  // 단축키: Ctrl+Z 되돌리기 · Ctrl+Y(Ctrl+Shift+Z) 다시 하기 (글자 입력칸 안에서는 그 칸의 글자 되돌리기) · Ctrl+S 저장
+  useEffect(() => {
+    const f = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((el as HTMLInputElement).type)));
+      if (k === 's') {
+        e.preventDefault();
+        document.querySelector<HTMLButtonElement>('[data-req-save]')?.click();
+      } else if (!typing && k === 'z' && !e.shiftKey) (e.preventDefault(), keeper.undo());
+      else if (!typing && (k === 'y' || (k === 'z' && e.shiftKey))) (e.preventDefault(), keeper.redo());
+    };
+    window.addEventListener('keydown', f);
+    return () => window.removeEventListener('keydown', f);
+  }, [keeper]);
 
   // 새 청구서: 현장 결재선 기본값
   const defaultSteps = (siteId: string): { type: Requisition['approvalType']; steps: ApprovalStepState[] } => {
@@ -426,6 +471,8 @@ export default function ReqEdit() {
       await audit(`구매청구 ${action}`, rid, { docNo: data.docNo, site: data.siteName });
       toast(okMsg);
       setComment('');
+      keeper.markSaved(rid);
+      setRestored(null);
       setD({ ...data, id: rid });
       if (!d.id) nav(`/req/${rid}`, { replace: true });
       return rid;
@@ -547,6 +594,7 @@ export default function ReqEdit() {
       ]);
       await audit('구매청구 휴지통 이동', d.id, { docNo: d.docNo });
       toast('휴지통으로 옮겼습니다.');
+      keeper.markSaved(d.id);
       nav('/req');
     } catch (e) {
       toast(errMsg(e), 'err');
@@ -971,13 +1019,13 @@ export default function ReqEdit() {
               </button>
             )}
             {pendEditable && (
-              <button className="btn-primary" disabled={busy} onClick={savePending}>
+              <button className="btn-primary" data-req-save={draftEditable ? undefined : ''} disabled={busy} onClick={savePending}>
                 수정 저장
               </button>
             )}
             {draftEditable && (
               <>
-                <button className="btn-ghost" disabled={busy} onClick={() => save({}, '임시 저장', '저장했습니다.')}>
+                <button className="btn-ghost" data-req-save disabled={busy} title="서버에 저장 (Ctrl+S) — 결재는 올리지 않음" onClick={() => save({}, '임시 저장', '임시 저장했습니다. 구매청구 목록의 작성중에서 다시 열 수 있습니다.')}>
                   임시 저장
                 </button>
                 <button className="btn-primary" disabled={busy} onClick={submit}>
@@ -998,6 +1046,51 @@ export default function ReqEdit() {
           </>
         }
       />
+      {restored && (
+        <div className="no-print mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12.5px] text-sky-900">
+          {restored.offer ? (
+            <>
+              <span>
+                저장하지 않은 작성 중 청구서가 있습니다 ({new Date(restored.at).toLocaleString('ko-KR')} · {restored.offer.siteName} · {restored.offer.lines.filter((l) => l.itemName).length}줄).
+              </span>
+              <button
+                className="btn-dark h-7 text-[12px]"
+                onClick={() => {
+                  setD(restored.offer!);
+                  keeper.markDirty();
+                  setRestored({ at: restored.at });
+                }}
+              >
+                이어서 쓰기
+              </button>
+              <button className="btn-ghost h-7 text-[12px]" onClick={() => (dropKept(profile?.id), setRestored(null))}>
+                버리기
+              </button>
+            </>
+          ) : (
+            <>
+              <span>저장하지 않고 나갔던 작성 내용을 불러왔습니다 ({new Date(restored.at).toLocaleString('ko-KR')}). 다 쓰면 임시 저장이나 결재 올리기를 누르세요.</span>
+              <button
+                className="btn-ghost h-7 text-[12px]"
+                onClick={() => {
+                  if (!confirm(d.id ? '불러온 작성 내용을 버리고 서버에 저장된 내용으로 되돌릴까요?' : '불러온 작성 내용을 버리고 새로 쓸까요?')) return;
+                  dropKept(profile?.id, d.id);
+                  keeper.markSaved(d.id);
+                  keeper.reset();
+                  setRestored(null);
+                  if (d.id && stored) setD(structuredClone(stored));
+                  else setD(null);
+                }}
+              >
+                {d.id ? '저장된 내용으로 되돌리기' : '버리고 새로 쓰기'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {keepActive && !restored && keeper.dirty && (
+        <div className="no-print mb-2 text-right text-[11.5px] text-muted">작성 내용은 이 브라우저에 자동 보관됩니다 — 다른 화면에 갔다 와도 그대로 남습니다. 서버 저장은 [임시 저장]</div>
+      )}
 
       {inTrash && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-800">
@@ -1217,6 +1310,12 @@ export default function ReqEdit() {
           {prices.error && <span className="text-[12px] text-red-600">단가표를 읽지 못했습니다</span>}
           {editable && (
             <div className="ml-auto flex gap-2">
+              <button className="btn-ghost h-7 px-2 text-[12px]" disabled={!keeper.canUndo} title="되돌리기 (Ctrl+Z) — 잘못한 작업을 한 단계씩 취소" onClick={keeper.undo}>
+                ↶ 되돌리기
+              </button>
+              <button className="btn-ghost h-7 px-2 text-[12px]" disabled={!keeper.canRedo} title="다시 하기 (Ctrl+Y)" onClick={keeper.redo}>
+                ↷
+              </button>
               <select className="input h-7 w-28 text-[12px]" value="" title="줄 순서 정렬" onChange={(e) => sortLines(e.target.value)}>
                 <option value="">줄 정렬 ▾</option>
                 <option value="item">품명·규격순</option>

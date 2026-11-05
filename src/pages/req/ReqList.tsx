@@ -6,6 +6,7 @@ import { purgeReq, restoreReq, useRequisitions } from '../../lib/reqs';
 import { audit } from '../../lib/db';
 import { won } from '../../lib/normalize';
 import { Empty, errMsg, PageHeader, useToast } from '../../components/ui';
+import { readKept } from '../../lib/reqKeeper';
 import { REQ_STATUS_LABEL, type ReqStatus, type Requisition } from '../../types';
 
 const STATUS_COLOR: Record<ReqStatus, string> = {
@@ -108,6 +109,20 @@ export default function ReqList() {
           )
         }
       />
+      {(() => {
+        // 저장 안 하고 나간 새 청구서 (이 브라우저에 보관)
+        const kept = readKept<Requisition>(profile?.id);
+        const n = kept?.d?.lines?.filter((l) => l.itemName).length ?? 0;
+        if (!kept || !n || readOnly) return null;
+        return (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12.5px] text-sky-900">
+            ✏️ 작성 중인 새 청구서가 있습니다 · {kept.d.siteName} · {n}줄 · {new Date(kept.at).toLocaleString('ko-KR')}
+            <Link to="/req/new" className="btn-dark ml-auto h-7 text-[12px]">
+              이어서 쓰기
+            </Link>
+          </div>
+        );
+      })()}
       <div className="card overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
           <Tab id="all" label="전체" />
