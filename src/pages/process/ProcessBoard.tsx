@@ -582,6 +582,28 @@ function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster;
     setAdding(null);
   };
 
+  /** 순서 바꾸기 (회사 전체 목록 순서, 바로 저장) */
+  const move = async (kind: 'zone' | 'trade', id: string, dir: -1 | 1) => {
+    const list = kind === 'zone' ? zones : trades;
+    const i = list.findIndex((x) => x.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    const ids = list.map((x) => x.id);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    const ord = new Map(ids.map((x, k) => [x, k + 1]));
+    const next = kind === 'zone' ? { ...m, zones: m.zones.map((z) => ({ ...z, order: ord.get(z.id) ?? z.order })) } : { ...m, trades: m.trades.map((t) => ({ ...t, order: ord.get(t.id) ?? t.order })) };
+    await saveMaster(next, `${kind === 'zone' ? '구역' : '공종'} 순서: ${list[i].name} ${dir < 0 ? '앞으로' : '뒤로'}`);
+  };
+  const moveSub = async (zid: string, sub: string, dir: -1 | 1) => {
+    const z = m.zones.find((x) => x.id === zid);
+    const subs = [...(z?.subs ?? [])];
+    const i = subs.indexOf(sub);
+    const j = i + dir;
+    if (!z || i < 0 || j < 0 || j >= subs.length) return;
+    [subs[i], subs[j]] = [subs[j], subs[i]];
+    await saveMaster({ ...m, zones: m.zones.map((x) => (x.id === zid ? { ...x, subs } : x)) }, `세부 위치 순서: ${z.name}`);
+  };
+
   /** 어느 현장이든 쓰고 있는지: 내역(기본 청구서)·청구서 */
   const usage = async (field: 'zoneId' | 'tradeId', id: string) => {
     const shs = await fetchWhere<BaseSheet>(C.baseSheets, field, id);
@@ -663,9 +685,15 @@ function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster;
           <thead>
             <tr>
               <th>구역</th>
-              {trades.map((t) => (
+              {trades.map((t, ti) => (
                 <th key={t.id} className="whitespace-nowrap text-center">
+                  <button className="mr-0.5 text-[11px] font-normal text-muted hover:text-ink disabled:opacity-20" title="왼쪽으로" disabled={busy || ti === 0} onClick={() => move('trade', t.id, -1)}>
+                    ◀
+                  </button>
                   {t.name}
+                  <button className="ml-0.5 text-[11px] font-normal text-muted hover:text-ink disabled:opacity-20" title="오른쪽으로" disabled={busy || ti === trades.length - 1} onClick={() => move('trade', t.id, 1)}>
+                    ▶
+                  </button>
                   <button className="ml-1 text-[11px] font-normal text-muted hover:text-red-600" title="공종 삭제 (회사 전체)" disabled={busy} onClick={() => delTrade(t.id)}>
                     ×
                   </button>
@@ -674,19 +702,37 @@ function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster;
             </tr>
           </thead>
           <tbody>
-            {zones.map((z) => (
+            {zones.map((z, zi) => (
               <tr key={z.id}>
                 <td className="font-medium">
                   <div className="flex items-center gap-1 whitespace-nowrap">
+                    <span className="flex flex-col leading-none">
+                      <button className="text-[9px] text-muted hover:text-ink disabled:opacity-20" title="위로" disabled={busy || zi === 0} onClick={() => move('zone', z.id, -1)}>
+                        ▲
+                      </button>
+                      <button className="text-[9px] text-muted hover:text-ink disabled:opacity-20" title="아래로" disabled={busy || zi === zones.length - 1} onClick={() => move('zone', z.id, 1)}>
+                        ▼
+                      </button>
+                    </span>
                     {z.name}
                     <button className="text-[11px] font-normal text-muted hover:text-red-600" title="구역 삭제 (회사 전체)" disabled={busy} onClick={() => delZone(z.id)}>
                       ×
                     </button>
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    {(z.subs ?? []).map((sub) => (
+                    {(z.subs ?? []).map((sub, si) => (
                       <span key={sub} className="chip bg-canvas text-[10.5px] font-normal text-muted">
+                        {si > 0 && (
+                          <button className="mr-0.5 hover:text-ink" title="앞으로" disabled={busy} onClick={() => moveSub(z.id, sub, -1)}>
+                            ‹
+                          </button>
+                        )}
                         {sub}
+                        {si < (z.subs ?? []).length - 1 && (
+                          <button className="ml-0.5 hover:text-ink" title="뒤로" disabled={busy} onClick={() => moveSub(z.id, sub, 1)}>
+                            ›
+                          </button>
+                        )}
                         <button className="ml-0.5 hover:text-red-600" title="세부 위치 삭제" onClick={() => delSub(z.id, sub)}>
                           ×
                         </button>
@@ -713,7 +759,7 @@ function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster;
         </table>
       </div>
       <div className="border-t border-line px-4 py-2 text-[12px] text-muted">
-        칸 체크는 이 현장에만 적용되고 [저장]을 눌러야 반영됩니다. 끈 칸은 현황판·청구서 공정 목록에서 빠지며 내역과 지난 청구서는 지워지지 않습니다. 구역·공종·세부 위치 추가·삭제(×)는 회사 전체 목록에 바로 반영되고, 어느 현장이든 내역이나 청구서가 있으면 삭제할 수 없습니다.
+        칸 체크는 이 현장에만 적용되고 [저장]을 눌러야 반영됩니다. 끈 칸은 현황판·청구서 공정 목록에서 빠지며 내역과 지난 청구서는 지워지지 않습니다. 구역·공종·세부 위치 추가·삭제(×)·순서(▲▼ ◀▶ ‹›)는 회사 전체 목록에 바로 반영되고, 어느 현장이든 내역이나 청구서가 있으면 삭제할 수 없습니다.
       </div>
     </div>
   );
