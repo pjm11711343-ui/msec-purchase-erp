@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, newId, stripUndefined } from '../../lib/db';
@@ -17,6 +17,7 @@ import PickInput from '../../components/PickInput';
 import ReqImportModal from './ReqImportModal';
 import { dropKept, readKept, useReqKeeper } from '../../lib/reqKeeper';
 import { lumpCells } from '../../lib/lump';
+import { useAutoFit } from '../../lib/autoFit';
 import HhRatesEditor from '../../components/HhRatesEditor';
 import { hhPerOf, hhRuleFor, isHhLine, useHhRates } from '../../lib/hh';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
@@ -184,6 +185,8 @@ export default function ReqEdit() {
   const procPrior = useMemo(() => (d?.zoneId && d.tradeId ? processPriorMap(reqs.data, d.siteId, d.zoneId, d.tradeId, d.id) : null), [reqs.data, d?.siteId, d?.zoneId, d?.tradeId, d?.id]);
   const siteCats = cats.data.filter((c) => c.siteId === d?.siteId).sort((a, b) => a.order - b.order);
   // 1식 분류(소모잡자재·공구손료·안전장비류·가설공사 등): 계약내역 1식·금액, 붙어 있는 같은 분류는 칸 합치기
+  const reqTblRef = useRef<HTMLTableElement>(null);
+  useAutoFit(reqTblRef, !!d);
   const lumpRows = useMemo(() => lumpCells(d?.lines ?? [], siteCats), [d?.lines, siteCats]);
   // 품명·규격 목록: 월별 품목명세(계산서) + 단가표 + 지난 청구서. 같은 품목(표기 차이)은 한 줄, 계산서 표기를 먼저 씀
   const catalog = useItemCatalog();
@@ -1409,7 +1412,7 @@ export default function ReqEdit() {
             </div>
           )}
           <div className={`req-scroll ${phoneTable ? '' : 'hidden md:block'}`}>
-            <table className="tbl req-tbl w-full table-fixed text-[12px]">
+            <table ref={reqTblRef} className="tbl req-tbl w-full table-fixed text-[12px]">
               <colgroup>
                 <col style={{ width: 40 }} />
                 <col style={{ width: '13%' }} />
@@ -1606,7 +1609,7 @@ export default function ReqEdit() {
                               1식
                             </td>
                             <td rowSpan={lump.span} className="num bg-sky-50/60 align-middle font-semibold">
-                              {lump.amount ? lump.amount.toLocaleString() : <span className="text-[11px] font-normal text-amber-700">금액 없음</span>}
+                              {lump.amount ? <span className="fit-text">{lump.amount.toLocaleString()}</span> : <span className="text-[11px] font-normal text-amber-700">금액 없음</span>}
                             </td>
                           </>
                         )}
@@ -1621,7 +1624,7 @@ export default function ReqEdit() {
                         </>
                       )}
                       <td className="num pt-2 text-muted" title={l.priorQtyManual != null ? '엑셀에서 받은 값' : '이전 승인 청구 합계'}>
-                        {pq ? pq.toLocaleString() : ''}
+                        <span className="fit-text">{pq ? pq.toLocaleString() : ''}</span>
                       </td>
 <td className="num font-semibold">
                         {(() => {
@@ -1655,7 +1658,7 @@ export default function ReqEdit() {
                             return (
                               <div className="leading-tight">
                                 <div className="text-[11px] font-normal text-muted">{l.hhCount}세대{l.hhType ? `(${l.hhType})` : ''}</div>
-                                <div>{(l.reqQty || 0).toLocaleString()}</div>
+                                <div className="fit-text">{(l.reqQty || 0).toLocaleString()}</div>
                               </div>
                             );
                           return N(l.key, 'reqQty', l.reqQty, rowEd, 'w-full');
@@ -1679,8 +1682,10 @@ export default function ReqEdit() {
                         </div>
                         {l.priceSource && <div className={`text-right text-[10px] ${l.priceSource === '지정단가' ? 'font-semibold text-violet-700' : 'text-muted'}`}>{l.priceSource}</div>}
                       </td>
-                      <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
-                      <td className="bg-amber-soft/40">
+                      <td className="num bg-amber-soft/40 pt-2">
+                        <span className="fit-text">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</span>
+                      </td>
+                      <td className="fit bg-amber-soft/40">
                         {rowOrderEd ? (
                           <PickInput
                             className="w-full"
@@ -1691,11 +1696,11 @@ export default function ReqEdit() {
                             onPasteRows={(rows) => pasteDown(l.key, 'vendor', rows)}
                           />
                         ) : (
-                          <span className="break-words">{l.vendorName}</span>
+                          <span className="fit-text">{l.vendorName}</span>
                         )}
                       </td>
                                             <td>{TA(l.key, 'remark', l.remark, rowEd)}</td>
-                      <td>
+                      <td className="fit">
                         {rowEd ? (
                           <PickInput
                             className="w-full"
@@ -1706,10 +1711,10 @@ export default function ReqEdit() {
                             onPasteRows={(rows) => pasteDown(l.key, 'cat', rows)}
                           />
                         ) : (
-                          catName(l.siteCategoryId)
+                          <span className="fit-text">{catName(l.siteCategoryId)}</span>
                         )}
                       </td>
-                      <td className={`num pt-2 ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}>{remain == null ? '' : remain.toLocaleString()}</td>
+                      <td className={`num pt-2 ${remain != null && remain < 0 ? 'font-semibold text-red-600' : 'text-muted'}`}><span className="fit-text">{remain == null ? '' : remain.toLocaleString()}</span></td>
                       {adminMemo.isAdmin && (
                         <td>
                           {l.itemName && <AdminMemoInput reqId={d.id} lineKey={l.key} itemName={l.itemName} spec={l.spec} memos={adminMemo.map} />}

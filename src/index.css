@@ -95,6 +95,12 @@ body {
 .req-tbl .input {
   @apply min-w-0 text-[12px];
 }
+/* 칸보다 긴 숫자·이름은 글씨를 줄여 한 줄로 (lib/autoFit) */
+.req-tbl .fit-text {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+}
 /* 단위 칸: 목록 화살표가 글자를 가리지 않게 (EA·SET 등이 잘리지 않도록) */
 .req-tbl input[list]::-webkit-calendar-picker-indicator {
   display: none !important;
