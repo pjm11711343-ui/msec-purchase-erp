@@ -409,6 +409,7 @@ export interface Receipt {
   date: string; // 현장 입고일 YYYY-MM-DD
   note?: string;
   source: 'vendor' | 'office';
+  kind?: 'return'; // 반품: qty는 음수로 저장 (입고 누계에서 빠짐)
   enteredBy: string;
   enteredByName: string;
   confirmed?: boolean; // 현장 확인

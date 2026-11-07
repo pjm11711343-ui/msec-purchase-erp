@@ -20,6 +20,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
   const [pick, setPick] = useState<Set<string>>(new Set());
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'in' | 'return'>('in'); // 입고 등록 / 반품 등록
   const canConfirm = !vendor && (can('admin', 'material', 'siteManager', 'siteStaff'));
   const isVendor = !!vendor;
   const who = vendor ? vendor.vendorName : (profile?.name ?? '');
@@ -111,6 +112,55 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
     }
   };
 
+  /** 반품: 입고된 수량 안에서, 음수 입고로 기록 (입고 누계·거래명세서에서 빠짐) */
+  const registerReturn = async () => {
+    if (!date) return toast('반품일을 입력하세요.', 'err');
+    if (!note.trim()) return toast('반품 사유를 메모 칸에 적어 주세요. (예: 규격 오납, 파손)', 'err');
+    const target = rows.filter((x) => pick.has(x.k) && num(qty[x.k] ?? '') > 0);
+    if (!target.length) return toast('반품할 줄을 고르고 반품 수량을 넣으세요.', 'err');
+    const over = target.find((x) => num(qty[x.k]) > x.received);
+    if (over) return toast(`${over.l.itemName} ${over.l.spec}: 반품 수량이 입고 누계(${over.received.toLocaleString()})보다 많습니다.`, 'err');
+    if (!confirm(`${target.length}줄을 반품으로 등록할까요?\n${target.map((x) => `${x.l.itemName} ${x.l.spec} ${num(qty[x.k])}${x.l.unit}`).slice(0, 5).join('\n')}`)) return;
+    const ops: Parameters<typeof commitBatch>[0] = target.map((x) => {
+      const rec: Omit<Receipt, 'id'> = {
+        poId: po.id,
+        poNo: po.poNo,
+        siteId: po.siteId,
+        siteName: po.siteName,
+        vendorId: po.vendorId,
+        vendorName: po.vendorName,
+        lineKey: x.k,
+        itemName: x.l.itemName,
+        spec: x.l.spec,
+        unit: x.l.unit,
+        qty: -num(qty[x.k]),
+        date,
+        note: `반품: ${note.trim()}`,
+        kind: 'return',
+        source: isVendor ? 'vendor' : 'office',
+        enteredBy: vendor?.id ?? profile?.id ?? '',
+        enteredByName: who,
+        createdAt: Date.now(),
+      };
+      return { type: 'set', col: C.receipts, id: newId(C.receipts), data: rec, merge: false };
+    });
+    setBusy(true);
+    try {
+      await commitBatch(ops);
+      await audit('반품 등록', po.poNo, { lines: ops.length, date, note });
+      toast(`${ops.length}줄 반품을 등록했습니다. 입고 누계에서 빠지고 남은 수량이 늘어납니다.`);
+      notifyQuiet('receipt', { poId: po.id, count: ops.length, date, kind: 'return', note: note.trim() });
+      setPick(new Set());
+      setQty({});
+      setNote('');
+      setMode('in');
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   /** 업체: 단가 변경 요청 (자재부 승인 후 발주서에 반영) */
   const requestChange = async () => {
     if (!chg) return;
@@ -154,19 +204,19 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
 
   /** 업체: 자기가 등록한 입고는 현장 확인 뒤에도 취소 가능 (거래명세서로 제출한 것은 불가) */
   const canCancel = (r: Receipt) =>
-    !readOnly && (isVendor ? r.enteredBy === vendor?.id && !billed?.has(r.id) : !r.confirmed || can('admin', 'material'));
+    !readOnly && (isVendor ? r.vendorId === vendor?.vendorId && !billed?.has(r.id) : !r.confirmed || can('admin', 'material'));
   const remove = async (list: Receipt[]) => {
     if (!list.length) return;
     const confirmedN = list.filter((r) => r.confirmed).length;
     const msg =
       list.length === 1
-        ? `${list[0].date} ${list[0].itemName} ${list[0].qty}${list[0].unit} 입고를 취소할까요?`
-        : `이 발주서의 입고 기록 ${list.length}건을 모두 취소할까요?`;
+        ? `${list[0].date} ${list[0].itemName} ${Math.abs(list[0].qty)}${list[0].unit} ${list[0].kind === 'return' ? '반품' : '입고'} 기록을 삭제할까요?`
+        : `이 발주서의 입고·반품 기록 ${list.length}건을 모두 삭제할까요?`;
     if (!confirm(msg + (confirmedN ? `\n(현장 확인된 입고 ${confirmedN}건 포함)` : ''))) return;
     try {
       await commitBatch(list.map((r) => ({ type: 'delete' as const, col: C.receipts, id: r.id })));
       await audit('입고 취소', po.poNo, { lines: list.length, by: who });
-      toast(`입고 ${list.length}건을 취소했습니다.`);
+      toast(`기록 ${list.length}건을 삭제했습니다.`);
     } catch (e) {
       toast(errMsg(e), 'err');
     }
@@ -188,17 +238,33 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
   return (
     <div>
       {!readOnly && (
-      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#fafbfc] px-4 py-2.5">
-        <span className="text-[12px] text-muted">현장 입고일</span>
+      <div className={`flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5 ${mode === 'return' ? 'bg-red-50' : 'bg-[#fafbfc]'}`}>
+        <div className="flex gap-0.5 rounded-md bg-white p-0.5 ring-1 ring-line">
+          <button className={`rounded px-2.5 py-1 text-[12px] ${mode === 'in' ? 'bg-navy-950 text-white' : 'text-muted'}`} onClick={() => (setMode('in'), setPick(new Set()), setQty({}))}>
+            입고
+          </button>
+          <button className={`rounded px-2.5 py-1 text-[12px] ${mode === 'return' ? 'bg-red-600 text-white' : 'text-muted'}`} onClick={() => (setMode('return'), setPick(new Set()), setQty({}))}>
+            반품
+          </button>
+        </div>
+        <span className="text-[12px] text-muted">{mode === 'return' ? '반품일' : '현장 입고일'}</span>
         <input className="input h-7 w-36" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <input className="input h-7 w-56" placeholder="메모 (예: 1차 분할 납품)" value={note} onChange={(e) => setNote(e.target.value)} />
+        <input className="input h-7 w-56" placeholder={mode === 'return' ? '반품 사유 (필수, 예: 규격 오납)' : '메모 (예: 1차 분할 납품)'} value={note} onChange={(e) => setNote(e.target.value)} />
         <div className="ml-auto flex gap-2">
-          <button className="btn-ghost h-7 text-[12px]" disabled={busy || !pick.size} onClick={() => register([...pick], false)}>
-            선택 {pick.size}줄 입고 등록
-          </button>
-          <button className="btn-primary h-7 text-[12px]" disabled={busy || !openKeys.length} onClick={() => register(openKeys, true)}>
-            남은 수량 전체 입고
-          </button>
+          {mode === 'in' ? (
+            <>
+              <button className="btn-ghost h-7 text-[12px]" disabled={busy || !pick.size} onClick={() => register([...pick], false)}>
+                선택 {pick.size}줄 입고 등록
+              </button>
+              <button className="btn-primary h-7 text-[12px]" disabled={busy || !openKeys.length} onClick={() => register(openKeys, true)}>
+                남은 수량 전체 입고
+              </button>
+            </>
+          ) : (
+            <button className="btn-danger h-7 text-[12px]" disabled={busy || !pick.size} onClick={registerReturn}>
+              선택 {pick.size}줄 반품 등록
+            </button>
+          )}
         </div>
       </div>
       )}
@@ -206,7 +272,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
         <thead>
           <tr>
             <th className="w-8">
-              <input type="checkbox" checked={openKeys.length > 0 && openKeys.every((k) => pick.has(k))} onChange={(e) => setPick(e.target.checked ? new Set(openKeys) : new Set())} />
+              {mode === 'in' && <input type="checkbox" checked={openKeys.length > 0 && openKeys.every((k) => pick.has(k))} onChange={(e) => setPick(e.target.checked ? new Set(openKeys) : new Set())} />}
             </th>
             <th>품명</th>
             <th>규격</th>
@@ -215,14 +281,14 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
             {showPrice && <th className="num w-44">단가</th>}
             <th className="num">입고 누계</th>
             <th className="num">남은 수량</th>
-            <th className="num">이번 입고</th>
+            <th className="num">{mode === 'return' ? '반품 수량' : '이번 입고'}</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.k} className={r.remain === 0 ? 'text-muted' : ''}>
+            <tr key={r.k} className={mode === 'in' && r.remain === 0 ? 'text-muted' : ''}>
               <td>
-                {r.remain > 0 && !readOnly && (
+                {(mode === 'in' ? r.remain > 0 : r.received > 0) && !readOnly && (
                   <input
                     type="checkbox"
                     checked={pick.has(r.k)}
@@ -298,7 +364,18 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
               <td className="num">{r.received ? r.received.toLocaleString() : ''}</td>
               <td className={`num font-semibold ${r.remain ? '' : 'text-emerald-600'}`}>{r.remain ? r.remain.toLocaleString() : '완료'}</td>
               <td className="num">
-                {r.remain > 0 && !readOnly && (
+                {mode === 'return' && r.received > 0 && !readOnly && (
+                  <input
+                    className="input h-7 w-20 border-red-300 px-1.5 text-right"
+                    placeholder={`최대 ${r.received.toLocaleString()}`}
+                    value={qty[r.k] ?? ''}
+                    onChange={(e) => {
+                      setQty((q) => ({ ...q, [r.k]: commaText(e.target.value) }));
+                      setPick((s) => new Set(s).add(r.k));
+                    }}
+                  />
+                )}
+                {mode === 'in' && r.remain > 0 && !readOnly && (
                   <input
                     className="input h-7 w-20 px-1.5 text-right"
                     value={qty[r.k] ?? commaText(String(r.remain))}
@@ -315,10 +392,10 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
       </table></div>
 
       <div className="flex items-center gap-2 border-t border-line px-4 py-2">
-        <span className="font-semibold">입고 기록 {mine.length}건</span>
+        <span className="font-semibold">입고·반품 기록 {mine.length}건</span>
         {mine.filter(canCancel).length > 1 && (
           <button className="btn-ghost ml-auto h-7 text-[12px] text-red-600" onClick={() => remove(mine.filter(canCancel))}>
-            입고 전체 취소 ({mine.filter(canCancel).length}건)
+            기록 전체 삭제 ({mine.filter(canCancel).length}건)
           </button>
         )}
         {canConfirm && mine.some((r) => !r.confirmed) && (
@@ -343,11 +420,12 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
           </thead>
           <tbody>
             {mine.map((r) => (
-              <tr key={r.id}>
+              <tr key={r.id} className={r.qty < 0 ? 'bg-red-50/50' : ''}>
                 <td className="whitespace-nowrap">{r.date}</td>
                 <td>{r.itemName}</td>
                 <td>{r.spec}</td>
-                <td className="num">
+                <td className={`num ${r.qty < 0 ? 'font-semibold text-red-600' : ''}`}>
+                  {r.qty < 0 && <span className="chip mr-1 bg-red-100 text-red-700">반품</span>}
                   {r.qty.toLocaleString()} {r.unit}
                 </td>
                 <td className="text-muted">{r.note}</td>
@@ -359,7 +437,7 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
                 <td className="text-right">
                   {canCancel(r) ? (
                     <button className="text-[12px] text-muted hover:text-red-600" onClick={() => remove([r])}>
-                      입고 취소
+                      삭제
                     </button>
                   ) : isVendor && billed?.has(r.id) ? (
                     <span className="text-[11px] text-muted" title="거래명세서로 제출한 입고는 취소할 수 없습니다">명세서 제출됨</span>

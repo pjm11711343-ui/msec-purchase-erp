@@ -115,7 +115,9 @@ export default async function handler(req: Req, res: Res) {
       const date = String(body.date ?? '');
       const sent = await sendTelegram(
         s?.telegramChatId,
-        `🚚 <b>입고 등록</b> ${esc(po.siteName)}\n${esc(po.vendorName)} · ${esc(po.poNo)}\n${date ? `입고일 ${esc(date)} · ` : ''}${n ? `${n}줄` : ''}\n입력: ${esc(who)}\n현장에서 입고 확인 부탁드립니다: ${origin}/receipt`,
+        body.kind === 'return'
+          ? `↩️ <b>반품 등록</b> ${esc(po.siteName)}\n${esc(po.vendorName)} · ${esc(po.poNo)}\n${date ? `반품일 ${esc(date)} · ` : ''}${n ? `${n}줄` : ''}${body.note ? `\n사유 ${esc(String(body.note))}` : ''}\n입력: ${esc(who)}\n${origin}/receipt`
+          : `🚚 <b>입고 등록</b> ${esc(po.siteName)}\n${esc(po.vendorName)} · ${esc(po.poNo)}\n${date ? `입고일 ${esc(date)} · ` : ''}${n ? `${n}줄` : ''}\n입력: ${esc(who)}\n현장에서 입고 확인 부탁드립니다: ${origin}/receipt`,
       );
       return res.status(200).json({ ok: true, telegram: sent });
     }
