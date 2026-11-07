@@ -19,7 +19,7 @@ import { dropKept, readKept, useReqKeeper } from '../../lib/reqKeeper';
 import HhRatesEditor from '../../components/HhRatesEditor';
 import { hhPerOf, hhRuleFor, isHhLine, useHhRates } from '../../lib/hh';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
-import { itemKey, makeItemStd, pickListPrice, priceValid, siteCatOfStd, useItemCats, useItemEntries, usePriceList } from '../../lib/itemMaster';
+import { itemKey, makeItemStd, pickFixedPrice, pickListPrice, priceValid, siteCatOfStd, useItemCats, useItemEntries, usePriceList } from '../../lib/itemMaster';
 import { normItem, normSpec } from '../../lib/itemNorm';
 import { NO_CAT, reqSummary, type ReqSummary } from '../../lib/reqSummary';
 import { cellKey, defaultCells, processLabel, processPriorMap, sortedTrades, sortedZones, useBaseSheets, useProcessMaster, useSiteProcess, type BaseLine } from '../../lib/process';
@@ -307,6 +307,9 @@ export default function ReqEdit() {
   /** 단가 자동: 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
   const suggest = (l: ReqLine): Partial<ReqLine> => {
     if (!l.itemName) return {};
+    // 현장 지정단가가 맨 먼저
+    const fp = pickFixedPrice(priceList.data, l.itemName, l.spec, d.siteId, l.vendorId || undefined);
+    if (fp) return { orderPrice: fp.price, priceSource: '지정단가', unit: l.unit || fp.unit, ...(!l.vendorId ? { vendorId: fp.vendorId, vendorName: fp.vendorName } : {}) };
     const ip = invoicePrice(l.itemName, l.spec, d.siteId);
     if (ip) {
       const u = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`)?.u;
@@ -385,7 +388,7 @@ export default function ReqEdit() {
   };
   /** 품명·규격은 목록에서 고른 값만. 바꾸면 자동 단가는 다시 찾는다 */
   const resetAuto = (l: ReqLine): Partial<ReqLine> => ({
-    ...(l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {}),
+    ...(l.priceSource === '지정단가' || l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {}),
     // 품명·규격이 바뀌면 세대 청구 값도 다시
     ...(l.hhCount != null ? { hhCount: undefined, hhType: undefined, hhPer: undefined, hhUnit: undefined } : {}),
   });
@@ -1651,7 +1654,7 @@ export default function ReqEdit() {
                             </button>
                           )}
                         </div>
-                        {l.priceSource && <div className="text-right text-[10px] text-muted">{l.priceSource}</div>}
+                        {l.priceSource && <div className={`text-right text-[10px] ${l.priceSource === '지정단가' ? 'font-semibold text-violet-700' : 'text-muted'}`}>{l.priceSource}</div>}
                       </td>
                       <td className="num bg-amber-soft/40 pt-2">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</td>
                       <td className="bg-amber-soft/40">
@@ -1907,7 +1910,7 @@ export default function ReqEdit() {
             const cands = findPrices(prices.rows, l.itemName, l.spec);
             const last = lastOrderPrice(reqs.data, l.itemName, l.spec);
             const ik = itemKey(l.itemName, l.spec);
-            const erpRows = priceList.data.filter((p) => itemKey(p.itemName, p.spec) === ik && (!p.siteId || p.siteId === d.siteId)).sort((a, b) => a.price - b.price);
+            const erpRows = priceList.data.filter((p) => itemKey(p.itemName, p.spec) === ik && (!p.siteId || p.siteId === d.siteId)).sort((a, b) => Number(!!b.fixed) - Number(!!a.fixed) || a.price - b.price);
             const ci = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`);
             const invRows: { label: string; lp: LastPrice }[] = [];
             if (ci?.site[d.siteId]) invRows.push({ label: '이 현장 최신', lp: ci.site[d.siteId] });
@@ -1976,7 +1979,7 @@ export default function ReqEdit() {
                         <tr key={p.id} className={priceValid(p) ? '' : 'text-muted'}>
                           <td>{p.vendorName}</td>
                           <td className="text-muted">{p.maker}</td>
-                          <td>{p.siteName ? <span className="chip bg-amber-soft text-amber-800">이 현장</span> : <span className="text-[12px] text-muted">공통</span>}</td>
+                          <td>{p.fixed ? <span className="chip bg-violet-100 text-violet-800">현장 지정단가</span> : p.siteName ? <span className="chip bg-amber-soft text-amber-800">이 현장</span> : <span className="text-[12px] text-muted">공통</span>}</td>
                           <td className="num">{p.listPrice ? won(p.listPrice) : ''}</td>
                           <td className="num">{p.negoRate ? `${p.negoRate}%` : ''}</td>
                           <td className="num font-semibold">
@@ -1984,7 +1987,7 @@ export default function ReqEdit() {
                             {!priceValid(p) && <span className="ml-1 text-[10.5px] text-red-600">기간 밖</span>}
                           </td>
                           <td className="text-right">
-                            <button className="btn-dark h-7 text-[12px]" onClick={() => choose({ orderPrice: p.price, priceSource: 'ERP단가', vendorId: p.vendorId, vendorName: p.vendorName })}>
+                            <button className="btn-dark h-7 text-[12px]" onClick={() => choose({ orderPrice: p.price, priceSource: p.fixed ? '지정단가' : 'ERP단가', vendorId: p.vendorId, vendorName: p.vendorName })}>
                               적용
                             </button>
                           </td>

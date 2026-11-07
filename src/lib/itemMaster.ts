@@ -37,6 +37,7 @@ export interface PriceEntry {
   maker?: string; // 제조사(메이커)
   siteId?: string; // 있으면 그 현장만의 예외 단가
   siteName?: string;
+  fixed?: boolean; // 현장 지정단가 (siteId 필수): 그 현장 청구서 단가 자동 채우기에서 맨 먼저 (계산서 단가보다 앞)
   listPrice: number; // 협가
   negoRate: number; // 네고율 %
   price: number; // 구매단가
@@ -71,6 +72,18 @@ export function pickListPrice(list: PriceEntry[], item: string, spec: string, si
   const siteOnes = use.filter((p) => p.siteId && p.siteId === siteId);
   return [...(siteOnes.length ? siteOnes : use)].sort((a, b) => a.price - b.price)[0];
 }
+
+/** 현장 지정단가: 그 현장·품목의 지정단가 (거래선이 있으면 그 업체 것, 없으면 하나뿐이면 그것·여럿이면 가장 싼 것) */
+export function pickFixedPrice(list: PriceEntry[], item: string, spec: string, siteId?: string, vendorId?: string): PriceEntry | undefined {
+  if (!siteId) return undefined;
+  const k = itemKey(item, spec);
+  const cands = list.filter((p) => p.fixed && p.siteId === siteId && p.price > 0 && priceValid(p) && itemKey(p.itemName, p.spec) === k);
+  if (!cands.length) return undefined;
+  if (vendorId) return cands.find((p) => p.vendorId === vendorId);
+  return [...cands].sort((a, b) => a.price - b.price)[0];
+}
+/** 지정단가와 다른 단가인지 (반올림 차이 0.5원은 같은 것으로) */
+export const offFixed = (fixed: number | undefined, price: number | undefined) => !!fixed && !!price && Math.abs(fixed - price) > 0.5;
 
 /** 협가·네고율 → 구매단가 */
 export const buyPrice = (list: number, nego: number) => Math.round(list * (1 - (nego || 0) / 100));

@@ -12,6 +12,7 @@ import { usePurchaseOrders } from '../lib/pos';
 import { usePoPrices, withVendorPrices } from '../lib/poPrices';
 import { poLineKey, useReceipts } from '../lib/receipts';
 import { billMonthOf } from '../lib/billing';
+import { itemKey as ik2, offFixed, priceValid, usePriceList } from '../lib/itemMaster';
 import { Empty, PageHeader, Stat } from '../components/ui';
 import type { Invoice } from '../types';
 
@@ -62,6 +63,10 @@ export default function Reconcile() {
   const [onlyDiff, setOnlyDiff] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const invs = useCollection<Invoice>(C.invoices, [where('month', '==', month)], month);
+  const priceList = usePriceList();
+  /** 현장 지정단가 (현장|업체|품목) */
+  const fixedMap = useMemo(() => new Map(priceList.data.filter((p) => p.fixed && p.siteId && priceValid(p, `${month}-15`)).map((p) => [`${p.siteId}|${p.vendorId}|${ik2(p.itemName, p.spec)}`, p.price])), [priceList.data, month]);
+  const fixedOf = (g: Group, i: ItemRow) => fixedMap.get(`${g.siteId}|${g.vendorId}|${i.key}`);
 
   const groups = useMemo(() => {
     const poMap = new Map(pos.data.map((p) => [p.id, withVendorPrices(p, prices.data)]));
@@ -206,6 +211,10 @@ export default function Reconcile() {
                         ) : (
                           <span className="chip bg-red-50 text-red-700">차이</span>
                         )}
+                        {(() => {
+                          const n = x.items.filter((i) => offFixed(fixedOf(x, i), i.invPrice)).length;
+                          return n ? <span className="chip ml-1 bg-violet-100 text-violet-800">지정단가 다름 {n}</span> : null;
+                        })()}
                       </td>
                     </tr>
                     {open === x.key && (
@@ -221,6 +230,7 @@ export default function Reconcile() {
                                 <th className="num">명세서 수량</th>
                                 <th className="num">ERP 단가</th>
                                 <th className="num">명세서 단가</th>
+                                <th className="num">지정단가</th>
                                 <th className="num">ERP 금액</th>
                                 <th className="num">명세서 금액</th>
                                 <th className="num">차이</th>
@@ -241,7 +251,10 @@ export default function Reconcile() {
                                       <td className={`num ${qBad ? 'font-bold text-red-600' : ''}`}>{i.erpQty.toLocaleString()}</td>
                                       <td className={`num ${qBad ? 'font-bold text-red-600' : ''}`}>{i.invQty.toLocaleString()}</td>
                                       <td className={`num ${pBad ? 'font-bold text-red-600' : ''}`}>{won(i.erpPrice)}</td>
-                                      <td className={`num ${pBad ? 'font-bold text-red-600' : ''}`}>{won(i.invPrice)}</td>
+                                      <td className={`num ${pBad || offFixed(fixedOf(x, i), i.invPrice) ? 'font-bold text-red-600' : ''}`}>{won(i.invPrice)}</td>
+                                      <td className={`num ${offFixed(fixedOf(x, i), i.invPrice) ? 'bg-red-50 font-bold text-violet-800' : 'text-violet-800'}`} title={offFixed(fixedOf(x, i), i.invPrice) ? '명세서 단가가 현장 지정단가와 다릅니다' : undefined}>
+                                        {fixedOf(x, i) ? won(fixedOf(x, i)!) : ''}
+                                      </td>
                                       <td className="num">{won(i.erpAmt)}</td>
                                       <td className="num">{won(i.invAmt)}</td>
                                       <td className={`num ${Math.abs(dd) > TOL ? 'font-bold text-red-600' : ''}`}>{dd > 0 ? '+' : ''}{won(dd)}</td>
@@ -250,7 +263,7 @@ export default function Reconcile() {
                                 })}
                             </tbody>
                           </table>
-                          <div className="px-1 pt-1.5 text-[11.5px] text-muted">빨간 수량 = 입고 기록과 명세서 수량이 다름 · 빨간 단가 = 발주 단가와 명세서 단가가 다름. ERP 단가가 0이면 발주서에 단가가 비어 있는 줄입니다.</div>
+                          <div className="px-1 pt-1.5 text-[11.5px] text-muted">빨간 수량 = 입고 기록과 명세서 수량이 다름 · 빨간 단가 = 발주 단가 또는 현장 지정단가와 명세서 단가가 다름. ERP 단가가 0이면 발주서에 단가가 비어 있는 줄입니다.</div>
                         </td>
                       </tr>
                     )}

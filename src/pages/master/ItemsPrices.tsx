@@ -17,9 +17,10 @@ import { nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { loadPrices, type PriceRow } from '../../lib/prices';
 import PickInput from '../../components/PickInput';
+import SiteFixedPrices from './SiteFixedPrices';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
 
-type Tab = 'items' | 'prices' | 'requests';
+type Tab = 'items' | 'prices' | 'fixed' | 'requests';
 
 interface Row {
   key: string;
@@ -94,13 +95,14 @@ export default function ItemsPrices() {
     <div>
       <PageHeader
         title="품목·단가"
-        desc="청구서 품명·규격은 이 품목 목록(계산서 품목 + 직접 등록)에서 고릅니다. 단가표는 업체별 단가(현장 예외 가능)이고, 청구서 단가 자동 채우기에 씁니다 (최신 계산서 → 이 단가표 → 단가관리 단가표 → 직전 발주)."
+        desc="청구서 품명·규격은 이 품목 목록(계산서 품목 + 직접 등록)에서 고릅니다. 단가표는 업체별 단가(현장 예외 가능)이고, 청구서 단가 자동 채우기에 씁니다 (현장 지정단가 → 최신 계산서 → 이 단가표 → 단가관리 단가표 → 직전 발주)."
       />
       <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
         {(
           [
             ['items', `품목 목록 ${rows.filter((r) => !r.hidden).length.toLocaleString()}`],
             ['prices', `단가표 ${prices.data.length.toLocaleString()}`],
+            ['fixed', `현장 지정단가 ${prices.data.filter((p) => p.fixed).length.toLocaleString()}`],
             ['requests', `등록 요청${requests.length ? ` ${requests.length}` : ''}`],
           ] as [Tab, string][]
         ).map(([k, label]) => (
@@ -110,7 +112,8 @@ export default function ItemsPrices() {
         ))}
       </div>
       {tab === 'items' && <ItemsTab rows={rows} office={office} who={who} std={std.data} catalogAt={catalog.at} onCompare={setCompare} toast={toast} />}
-      {tab === 'prices' && <PricesTab list={prices.data} rows={rows} vendors={vendors.data} sites={sites.data} office={office} who={who} onCompare={setCompare} toast={toast} />}
+      {tab === 'prices' && <PricesTab list={prices.data.filter((p) => !p.fixed)} rows={rows} vendors={vendors.data} sites={sites.data} office={office} who={who} onCompare={setCompare} toast={toast} />}
+      {tab === 'fixed' && <SiteFixedPrices list={prices.data} rows={rows} catalog={catalog.items} vendors={vendors.data} sites={sites.data} office={office} who={who} toast={toast} />}
       {tab === 'requests' && <RequestsTab requests={requests} rows={rows} office={office} who={who} toast={toast} />}
       {compare && <PriceCompare item={compare.item} spec={compare.spec} list={prices.data} catalog={catalog.items} sites={sites.data} onClose={() => setCompare(null)} />}
     </div>
