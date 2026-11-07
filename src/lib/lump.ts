@@ -5,7 +5,8 @@ import type { SiteCategory } from '../types';
 
 export const LUMP_CATS = ['소모잡자재', '공구손료', '조립식가대', 'SUPPORT', '안전장비류', '가설공사', '가설공사+가설울타리공사', '명판'];
 const KEYS = new Set(LUMP_CATS.map((x) => nameKey(x).toLowerCase()));
-export const isLumpCat = (name?: string) => !!name && KEYS.has(nameKey(name).toLowerCase());
+/** 괄호 안 내용은 빼고 비교 (예: 소모잡자재(기계설비) · 공구손료(소방설비) → 소모잡자재 · 공구손료) */
+export const isLumpCat = (name?: string) => !!name && KEYS.has(nameKey(name.replace(/[(（［\[][^)）］\]]*[)）］\]]/g, '')).toLowerCase());
 /** 1식 금액: 변경예상금액, 없으면 도급금액 */
 export const lumpAmount = (c: Pick<SiteCategory, 'changeAmount' | 'contractAmount'>) => c.changeAmount || c.contractAmount || 0;
 
