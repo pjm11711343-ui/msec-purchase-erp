@@ -1523,7 +1523,7 @@ export default function ReqEdit() {
                           <div className="pt-1">{i + 1}</div>
                         )}
                       </td>
-                      <td>
+                      <td className="text-center [&_input]:text-center">
                         {rowEd ? (
                           <PickInput
                             className="w-full"
@@ -1573,7 +1573,7 @@ export default function ReqEdit() {
                           </div>
                         ))}
                       </td>
-                      <td>
+                      <td className="text-center [&_input]:text-center">
                         {rowEd ? (
                           <PickInput
                             className="w-full"
