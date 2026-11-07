@@ -8,7 +8,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../auth/AuthContext';
 import { audit, commitBatch, fetchWhere } from '../../lib/db';
-import { C } from '../../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { C, db } from '../../lib/firebase';
 import { useSiteCategories, useSites, useStandardCategories } from '../../lib/hooks';
 import { itemKey } from '../../lib/itemMaster';
 import { useItemCatalog } from '../../lib/itemCatalog';
@@ -135,7 +136,7 @@ export default function ProcessBoard() {
       ) : tab === 'sheet' ? (
         <SheetTab key={siteId} m={m} siteId={siteId} cells={cells} cell={cell} setCell={(c) => set({ cell: c })} sheets={sheets.data} reqs={reqs.data} office={office} who={who} toast={toast} onNew={(z, t) => nav(`/req/new?site=${siteId}&zone=${z}&trade=${t}`)} />
       ) : tab === 'setup' ? (
-        <SetupTab key={siteId} m={m} siteId={siteId} sproc={sproc.data} sheets={sheets.data} reqs={reqs.data} toast={toast} />
+        <SetupTab key={siteId} m={m} siteId={siteId} sites={sites.data} sproc={sproc.data} sheets={sheets.data} reqs={reqs.data} toast={toast} />
       ) : (
         <ImportTab key={siteId} m={m} siteId={siteId} siteName={site?.name ?? ''} sproc={sproc.data} sheets={sheets.data} who={who} toast={toast} onDone={() => set({ tab: 'board' })} />
       )}
@@ -529,10 +530,11 @@ function SheetTab({ m, siteId, cells, cell, setCell, sheets, reqs, office, who, 
  *  - 이 현장에서 쓰는 칸(구역 × 공종) 켜고 끄기
  *  - 구역·공종·세부 위치 추가·삭제 (회사 전체 구역·공종 목록에 반영)
  *  - 어느 현장이든 내역(기본 청구서)이나 청구서가 있으면 삭제 막기 */
-function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster; siteId: string; sproc?: SiteProcess; sheets: BaseSheet[]; reqs: Requisition[]; toast: Toast }) {
+function SetupTab({ m, siteId, sites, sproc, sheets, reqs, toast }: { m: ProcessMaster; siteId: string; sites: { id: string; name: string }[]; sproc?: SiteProcess; sheets: BaseSheet[]; reqs: Requisition[]; toast: Toast }) {
   const [cells, setCells] = useState<string[]>(sproc?.cells ?? defaultCells(m));
   const [adding, setAdding] = useState<{ kind: 'zone' | 'trade' | 'sub'; zoneId?: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [bulk, setBulk] = useState<{ ids: Set<string>; mode: 'same' | 'add' | 'remove' } | null>(null);
   const zones = sortedZones(m);
   const trades = sortedTrades(m);
   const toggle = (k: string) => setCells((c) => (c.includes(k) ? c.filter((x) => x !== k) : [...c, k]));
@@ -542,6 +544,36 @@ function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster;
       toast('저장했습니다.');
     } catch (e) {
       toast(errMsg(e), 'err');
+    }
+  };
+  /** 여러 현장에 한 번에: 똑같이 맞추기 / 체크한 칸 켜기만 / 체크 안 한 칸 끄기만 */
+  const applyBulk = async () => {
+    if (!bulk || !bulk.ids.size) return toast('적용할 현장을 고르세요.', 'err');
+    const label = bulk.mode === 'same' ? '이 표와 똑같이 맞추기' : bulk.mode === 'add' ? '체크한 칸 켜기 (다른 칸은 그대로)' : '체크 안 한 칸 끄기 (다른 칸은 그대로)';
+    if (!confirm(`${bulk.ids.size}개 현장에 "${label}"을(를) 적용할까요? 끈 칸의 내역·지난 청구서는 지워지지 않습니다.`)) return;
+    setBusy(true);
+    try {
+      const all = new Set(zones.flatMap((z) => trades.map((t) => cellKey(z.id, t.id))));
+      const off = [...all].filter((k) => !cells.includes(k));
+      const docs = await Promise.all(
+        [...bulk.ids].map(async (sid) => {
+          const snap = await getDoc(doc(db, C.siteProcess, sid));
+          return { sid, sp: snap.exists() ? (snap.data() as SiteProcess) : undefined };
+        }),
+      );
+      const ops: Parameters<typeof commitBatch>[0] = docs.map(({ sid, sp }) => {
+        const cur = sp?.cells ?? defaultCells(m);
+        const next = bulk.mode === 'same' ? cells : bulk.mode === 'add' ? [...new Set([...cur, ...cells])] : cur.filter((k) => !off.includes(k));
+        return { type: 'set' as const, col: C.siteProcess, id: sid, data: { cells: next, map: sp?.map ?? {}, updatedAt: Date.now() }, merge: true };
+      });
+      await commitBatch(ops);
+      await audit('공정 설정 여러 현장 적용', label, { sites: ops.length });
+      toast(`${ops.length}개 현장에 적용했습니다.`);
+      setBulk(null);
+    } catch (e) {
+      toast(errMsg(e), 'err');
+    } finally {
+      setBusy(false);
     }
   };
   /** 회사 전체 구역·공종 목록 저장 */
@@ -655,11 +687,74 @@ function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster;
           <button className="btn-ghost h-7 text-[12px]" disabled={busy} onClick={() => setAdding({ kind: 'trade', name: '' })}>
             + 공종
           </button>
+          <button className="btn-dark h-7 text-[12px]" disabled={busy} title="이 표의 체크를 여러 현장에 한 번에" onClick={() => setBulk({ ids: new Set(sites.map((x) => x.id)), mode: 'same' })}>
+            모든 현장에 적용
+          </button>
           <button className="btn-primary h-7 text-[12px]" onClick={save}>
             저장
           </button>
         </div>
       </div>
+      {bulk && (
+        <Modal
+          open
+          title="공정 설정 여러 현장에 적용"
+          onClose={() => setBulk(null)}
+          footer={
+            <>
+              <button className="btn-ghost" onClick={() => setBulk(null)}>
+                취소
+              </button>
+              <button className="btn-primary" disabled={busy || !bulk.ids.size} onClick={applyBulk}>
+                {bulk.ids.size}개 현장에 적용
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-[13px]">
+            <div className="text-[12px] text-muted">지금 보이는 표의 체크({cells.length}칸)를 고른 현장에 적용합니다. 이 현장도 적용하려면 같이 체크하세요.</div>
+            <div className="space-y-1">
+              {(
+                [
+                  ['same', '이 표와 똑같이 맞추기', '켠 칸은 켜고, 끈 칸은 끕니다'],
+                  ['add', '체크한 칸 켜기만', '각 현장에서 이미 켠 칸은 그대로 두고 더하기만'],
+                  ['remove', '체크 안 한 칸 끄기만', '각 현장에서 이 표에서 끈 칸만 끄기'],
+                ] as const
+              ).map(([k, t, dsc]) => (
+                <label key={k} className="flex items-start gap-2">
+                  <input type="radio" className="mt-1" checked={bulk.mode === k} onChange={() => setBulk({ ...bulk, mode: k })} />
+                  <span>
+                    <b>{t}</b> <span className="text-[12px] text-muted">— {dsc}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="rounded-md border border-line p-2">
+              <label className="mb-1 flex items-center gap-1.5 border-b border-line pb-1 font-semibold">
+                <input type="checkbox" checked={bulk.ids.size === sites.length} onChange={(e) => setBulk({ ...bulk, ids: e.target.checked ? new Set(sites.map((x) => x.id)) : new Set() })} /> 전체 현장 ({sites.length})
+              </label>
+              <div className="grid max-h-60 grid-cols-2 gap-x-3 gap-y-1 overflow-y-auto text-[12.5px]">
+                {sites.map((x) => (
+                  <label key={x.id} className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={bulk.ids.has(x.id)}
+                      onChange={() => {
+                        const n = new Set(bulk.ids);
+                        if (n.has(x.id)) n.delete(x.id);
+                        else n.add(x.id);
+                        setBulk({ ...bulk, ids: n });
+                      }}
+                    />
+                    {x.name}
+                    {x.id === siteId && <span className="text-[11px] text-muted">(지금)</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
       {adding && (
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-amber-soft/40 px-4 py-2 text-[12.5px]">
           <span className="font-semibold">{adding.kind === 'zone' ? '새 구역' : adding.kind === 'trade' ? '새 공종' : `${m.zones.find((z) => z.id === adding.zoneId)?.name} 세부 위치`}</span>
