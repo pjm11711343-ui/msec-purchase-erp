@@ -26,12 +26,31 @@ const STATUS: Record<Rfq['status'], [string, string]> = {
 };
 const lineKey = () => Math.random().toString(36).slice(2, 9);
 
+/** 견적 의뢰서 삭제: 의뢰서와 받은 견적을 같이 지운다 (이미 ERP 단가표에 반영한 단가는 그대로 남음) */
+async function deleteRfq(r: Pick<Rfq, 'id' | 'rfqNo' | 'status'>, quotes: RfqQuote[]): Promise<boolean> {
+  const mine = quotes.filter((q) => q.rfqId === r.id);
+  const got = mine.filter((q) => q.status === 'submitted').length;
+  const msg = [
+    `견적 의뢰서 ${r.rfqNo}을(를) 삭제할까요?`,
+    r.status !== 'draft' ? '업체 포털 견적 요청 목록에서도 사라집니다.' : '',
+    got ? `받은 견적 ${got}건도 같이 지워집니다. (이미 ERP 단가표에 반영한 단가는 그대로 남습니다)` : '',
+    '삭제하면 되돌릴 수 없습니다.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  if (!confirm(msg)) return false;
+  await commitBatch([{ type: 'delete', col: C.rfqs, id: r.id }, ...mine.map((q) => ({ type: 'delete' as const, col: C.rfqQuotes, id: q.id }))]);
+  await audit('견적 의뢰서 삭제', r.rfqNo, { quotes: mine.length });
+  return true;
+}
+
 export default function RfqPage() {
   const { id } = useParams();
   return id ? <RfqDetail id={id} /> : <RfqList />;
 }
 
 function RfqList() {
+  const toast = useToast();
   const rfqs = useRfqs();
   const quotes = useQuotes();
   const [q, setQ] = useState('');
@@ -66,6 +85,7 @@ function RfqList() {
                 <th className="text-center">업체</th>
                 <th className="text-center">회신</th>
                 <th>상태</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -93,6 +113,20 @@ function RfqList() {
                     </td>
                     <td>
                       <span className={`chip ${STATUS[r.status][1]}`}>{STATUS[r.status][0]}</span>
+                    </td>
+                    <td className="text-right">
+                      <button
+                        className="text-[12px] text-muted hover:text-red-600"
+                        onClick={async () => {
+                          try {
+                            if (await deleteRfq(r, quotes.data)) toast('삭제했습니다.');
+                          } catch (e) {
+                            toast(errMsg(e), 'err');
+                          }
+                        }}
+                      >
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 );
@@ -318,6 +352,24 @@ function RfqDetail({ id }: { id: string }) {
             <Link to="/rfq" className="btn-ghost">
               목록
             </Link>
+            {d.id && (
+              <button
+                className="btn-danger"
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    if (await deleteRfq({ id: d.id!, rfqNo: d.rfqNo, status: d.status }, quotes.data)) {
+                      toast('견적 의뢰서를 삭제했습니다.');
+                      nav('/rfq');
+                    }
+                  } catch (e) {
+                    toast(errMsg(e), 'err');
+                  }
+                }}
+              >
+                삭제
+              </button>
+            )}
             {editable ? (
               <>
                 <button className="btn-ghost" disabled={busy} onClick={() => save()}>
