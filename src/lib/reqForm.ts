@@ -133,10 +133,10 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
       if (lp.span > 0) {
         set(`E${r}`, '1식');
         set(`F${r}`, lp.amount || null);
-        set(`G${r}`, null);
         if (lp.span > 1) {
           const r2 = ITEM_ROWS[i + lp.span - 1];
-          for (const col of ['E', 'F', 'G']) {
+          // 실행(G)은 줄마다 칸을 나눠 둔다 (수기 작성용) — 수량·단가(E·F)만 합침
+          for (const col of ['E', 'F']) {
             for (let rr = r + 1; rr <= r2; rr++) ws.getCell(`${col}${rr}`).value = null;
             ws.mergeCells(`${col}${r}:${col}${r2}`);
             const cc = ws.getCell(`${col}${r}`);
@@ -145,10 +145,21 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
           }
         } else ws.getCell(`E${r}`).alignment = { ...(ws.getCell(`E${r}`).alignment ?? {}), horizontal: 'center', vertical: 'middle' };
       }
+      set(`G${r}`, null);
     } else {
       set(`E${r}`, n(l.contractQty));
       set(`F${r}`, n(l.contractPrice));
       set(`G${r}`, n(l.execQty));
+    }
+    // 품명·규격은 가운데, 계약 수량·단가는 칸을 넘으면 글씨 자동 축소
+    for (const col of ['B', 'C', 'E', 'F']) {
+      const cc = ws.getCell(`${col}${r}`);
+      if (cc.isMerged && cc.master.address !== cc.address) continue;
+      cc.style = JSON.parse(JSON.stringify(cc.style ?? {}));
+      cc.alignment =
+        col === 'B' || col === 'C'
+          ? { ...(cc.alignment ?? {}), horizontal: 'center', vertical: 'middle', wrapText: true, shrinkToFit: false }
+          : { ...(cc.alignment ?? {}), horizontal: col === 'E' && lp ? 'center' : 'right', vertical: 'middle', shrinkToFit: true, wrapText: false };
     }
     set(`H${r}`, n(l.priorQty));
     if (l.hhCount && l.hhCount > 0) {

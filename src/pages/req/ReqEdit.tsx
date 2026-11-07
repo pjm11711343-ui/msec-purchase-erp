@@ -1599,7 +1599,8 @@ export default function ReqEdit() {
                         )}
                       </td>
                       {lump ? (
-                        lump.span > 0 && (
+                        <>
+                        {lump.span > 0 && (
                           <>
                             <td rowSpan={lump.span} className="bg-sky-50/60 text-center align-middle font-semibold" title={`${lump.name}: 투입집계 변경예상금액(없으면 도급금액)`}>
                               1식
@@ -1607,9 +1608,11 @@ export default function ReqEdit() {
                             <td rowSpan={lump.span} className="num bg-sky-50/60 align-middle font-semibold">
                               {lump.amount ? lump.amount.toLocaleString() : <span className="text-[11px] font-normal text-amber-700">금액 없음</span>}
                             </td>
-                            <td rowSpan={lump.span} className="bg-sky-50/60" />
                           </>
-                        )
+                        )}
+                        {/* 실행은 1식이어도 줄마다 따로 */}
+                        <td className="num">{N(l.key, 'execQty', l.execQty, rowEd, 'w-full')}</td>
+                        </>
                       ) : (
                         <>
                           <td className="num">{N(l.key, 'contractQty', l.contractQty, rowEd, 'w-full')}</td>
@@ -2189,8 +2192,8 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs, cats }: { d: Omi
             </tr>
             {lines.map((l, li) => (
               <tr key={l.key} className="align-top">
-                <td className={`${c} break-words`}>{l.itemName}</td>
-                <td className={`${c} break-words`}>{l.spec}</td>
+                <td className={`${c} break-words text-center align-middle`}>{l.itemName}</td>
+                <td className={`${c} break-words text-center align-middle`}>{l.spec}</td>
                 <td className={`${c} text-center`}>{l.unit}</td>
                 {(() => {
                   const lp = lumpPrev[li];
@@ -2199,9 +2202,11 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs, cats }: { d: Omi
                       <>
                         <td rowSpan={lp.span} className={`${c} text-center align-middle`}>1식</td>
                         <td rowSpan={lp.span} className={`${c} text-right align-middle`}>{nf(lp.amount)}</td>
-                        <td rowSpan={lp.span} className={c}></td>
+                        <td className={c}></td>
                       </>
-                    ) : null;
+                    ) : (
+                      <td className={c}></td>
+                    );
                   return (
                     <>
                       <td className={`${c} text-right`}>{nf(l.contractQty)}</td>
