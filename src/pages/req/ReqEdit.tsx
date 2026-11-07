@@ -16,6 +16,7 @@ import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList
 import PickInput from '../../components/PickInput';
 import ReqImportModal from './ReqImportModal';
 import { dropKept, readKept, useReqKeeper } from '../../lib/reqKeeper';
+import { lumpCells } from '../../lib/lump';
 import HhRatesEditor from '../../components/HhRatesEditor';
 import { hhPerOf, hhRuleFor, isHhLine, useHhRates } from '../../lib/hh';
 import { useItemCatalog, type CatItem, type LastPrice } from '../../lib/itemCatalog';
@@ -29,7 +30,7 @@ import AdminMemoInput from '../../components/AdminMemoInput';
 import { notifyQuiet } from '../../lib/notify';
 import { aliasKey, saveReqAliases, useReqAliases } from '../../lib/reqAlias';
 import { similarity } from '../../lib/catMatch';
-import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type Vendor } from '../../types';
+import { ROLE_LABEL, type ApprovalStepState, type ReqLine, type Requisition, type SiteCategory, type Vendor } from '../../types';
 
 import { TEMPLATES, TYPE_LABEL, upgradeSteps } from '../../lib/approvalTemplates';
 const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
@@ -182,6 +183,8 @@ export default function ReqEdit() {
   const baseByItem = useMemo(() => new Map((baseSheet?.lines ?? []).map((b) => [itemKey(b.itemName, b.spec), b])), [baseSheet]);
   const procPrior = useMemo(() => (d?.zoneId && d.tradeId ? processPriorMap(reqs.data, d.siteId, d.zoneId, d.tradeId, d.id) : null), [reqs.data, d?.siteId, d?.zoneId, d?.tradeId, d?.id]);
   const siteCats = cats.data.filter((c) => c.siteId === d?.siteId).sort((a, b) => a.order - b.order);
+  // 1식 분류(소모잡자재·공구손료·안전장비류·가설공사 등): 계약내역 1식·금액, 붙어 있는 같은 분류는 칸 합치기
+  const lumpRows = useMemo(() => lumpCells(d?.lines ?? [], siteCats), [d?.lines, siteCats]);
   // 품명·규격 목록: 월별 품목명세(계산서) + 단가표 + 지난 청구서. 같은 품목(표기 차이)은 한 줄, 계산서 표기를 먼저 씀
   const catalog = useItemCatalog();
   const itemEntries = useItemEntries();
@@ -868,7 +871,7 @@ export default function ReqEdit() {
       const sumX = reqSummary(req, cats.data, reqs.data, pos.data);
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(tpl);
-      const { truncated } = fillReqForm(wb, req, sumX, logo, signs.byId, new Map(cats.data.map((c) => [c.id, c.name])));
+      const { truncated } = fillReqForm(wb, req, sumX, logo, signs.byId, new Map(cats.data.map((c) => [c.id, c.name])), siteCats);
       const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1468,6 +1471,7 @@ export default function ReqEdit() {
               </thead>
               <tbody onKeyDown={enterDown}>
                 {d.lines.map((l, i) => {
+                  const lump = lumpRows[i];
                   const pq = priorOf(l);
                   // 이미 발주(선발주)된 줄은 고칠 수 없음
                   const locked = !!d.id && d.status === 'pending' && !!ordered.get(`${d.id}|${l.key}`);
@@ -1594,9 +1598,25 @@ export default function ReqEdit() {
                           </datalist>
                         )}
                       </td>
-                                            <td className="num">{N(l.key, 'contractQty', l.contractQty, rowEd, 'w-full')}</td>
-                      <td className="num">{N(l.key, 'contractPrice', l.contractPrice, rowEd, 'w-full')}</td>
-                      <td className="num">{N(l.key, 'execQty', l.execQty, rowEd, 'w-full')}</td>
+                      {lump ? (
+                        lump.span > 0 && (
+                          <>
+                            <td rowSpan={lump.span} className="bg-sky-50/60 text-center align-middle font-semibold" title={`${lump.name}: 투입집계 변경예상금액(없으면 도급금액)`}>
+                              1식
+                            </td>
+                            <td rowSpan={lump.span} className="num bg-sky-50/60 align-middle font-semibold">
+                              {lump.amount ? lump.amount.toLocaleString() : <span className="text-[11px] font-normal text-amber-700">금액 없음</span>}
+                            </td>
+                            <td rowSpan={lump.span} className="bg-sky-50/60" />
+                          </>
+                        )
+                      ) : (
+                        <>
+                          <td className="num">{N(l.key, 'contractQty', l.contractQty, rowEd, 'w-full')}</td>
+                          <td className="num">{N(l.key, 'contractPrice', l.contractPrice, rowEd, 'w-full')}</td>
+                          <td className="num">{N(l.key, 'execQty', l.execQty, rowEd, 'w-full')}</td>
+                        </>
+                      )}
                       <td className="num pt-2 text-muted" title={l.priorQtyManual != null ? '엑셀에서 받은 값' : '이전 승인 청구 합계'}>
                         {pq ? pq.toLocaleString() : ''}
                       </td>
@@ -1795,7 +1815,7 @@ export default function ReqEdit() {
             </>
           }
         >
-          <ReqPreview d={d} priorOf={priorOf} catName={catName} sum={summary} process={d.zoneId ? processLabel(pm.master, d) : ''} signs={signs.byId} />
+          <ReqPreview cats={siteCats} d={d} priorOf={priorOf} catName={catName} sum={summary} process={d.zoneId ? processLabel(pm.master, d) : ''} signs={signs.byId} />
         </Modal>
       )}
       {/* 폰: 결재 버튼을 화면 아래에 고정 */}
@@ -2098,8 +2118,9 @@ export default function ReqEdit() {
 
 /** 하단 요약: 자재분류별 계약·변경(예상)·실행·기반입·금회청구 + 업체별 금회청구 */
 /** 구매청구서 미리보기: 회사 청구서 양식(엑셀)과 같은 칸 순서 */
-function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requisition, 'id'> & { id?: string }; priorOf: (l: ReqLine) => number; catName: (id?: string) => string | undefined; sum: ReqSummary; process: string; signs: Map<string, string> }) {
+function ReqPreview({ d, priorOf, catName, sum, process, signs, cats }: { d: Omit<Requisition, 'id'> & { id?: string }; priorOf: (l: ReqLine) => number; catName: (id?: string) => string | undefined; sum: ReqSummary; process: string; signs: Map<string, string>; cats: SiteCategory[] }) {
   const lines = d.lines.filter((l) => l.itemName.trim());
+  const lumpPrev = lumpCells(lines, cats);
   const amt = (l: ReqLine) => lineAmount({ ...l, orderQty: l.orderQty || l.reqQty });
   const total = lines.reduce((a, l) => a + amt(l), 0);
   const nf = (v?: number) => (v ? v.toLocaleString() : '');
@@ -2166,14 +2187,29 @@ function ReqPreview({ d, priorOf, catName, sum, process, signs }: { d: Omit<Requ
               <td className={c}></td>
               <td className={`${c} whitespace-pre-wrap break-words text-center text-[10px] font-semibold`}>{usePurposeOf(d)}</td>
             </tr>
-            {lines.map((l) => (
+            {lines.map((l, li) => (
               <tr key={l.key} className="align-top">
                 <td className={`${c} break-words`}>{l.itemName}</td>
                 <td className={`${c} break-words`}>{l.spec}</td>
                 <td className={`${c} text-center`}>{l.unit}</td>
-                <td className={`${c} text-right`}>{nf(l.contractQty)}</td>
-                <td className={`${c} text-right`}>{nf(l.contractPrice)}</td>
-                <td className={`${c} text-right`}>{nf(l.execQty)}</td>
+                {(() => {
+                  const lp = lumpPrev[li];
+                  if (lp)
+                    return lp.span > 0 ? (
+                      <>
+                        <td rowSpan={lp.span} className={`${c} text-center align-middle`}>1식</td>
+                        <td rowSpan={lp.span} className={`${c} text-right align-middle`}>{nf(lp.amount)}</td>
+                        <td rowSpan={lp.span} className={c}></td>
+                      </>
+                    ) : null;
+                  return (
+                    <>
+                      <td className={`${c} text-right`}>{nf(l.contractQty)}</td>
+                      <td className={`${c} text-right`}>{nf(l.contractPrice)}</td>
+                      <td className={`${c} text-right`}>{nf(l.execQty)}</td>
+                    </>
+                  );
+                })()}
                 <td className={`${c} text-right`}>{nf(priorOf(l))}</td>
                 <td className={`${c} text-right font-semibold`}>
                   {isHhLine(l) ? (

@@ -9,7 +9,8 @@
 //   결재란: 29행 머리글, 31~32행 이름·승인일 (현장 M·O / 본사 T·U·V·W, 본사 5칸이면 R:S·T·U·V·W) — 결재선 순서대로
 //   B32 날짜, I32 합계
 import type ExcelJS from 'exceljs';
-import type { Requisition } from '../types';
+import type { Requisition, SiteCategory } from '../types';
+import { lumpCells } from './lump';
 import { bonNote } from './pipe';
 import { boxLabel, isSiteStepLabel } from './approvalTemplates';
 import { NO_VENDOR, type ReqSummary, type SumRow } from './reqSummary';
@@ -23,6 +24,8 @@ export function usePurposeOf(r: Pick<Requisition, 'usePurpose' | 'lines'>) {
 
 /** 이어지는 쪽(35행~) 한 쪽에 들어가는 품목 줄 수 (A4 가로·73% 기준, 1~6행 제목 반복 포함) */
 export const PAGE_ROWS = 23;
+/** 쪽이 끝나는 품목 행 (2쪽부터: 57, 80, 103 …) — 1식 칸 합치기를 쪽 경계에서 끊는다 */
+const PAGE_BREAK_AFTER = new Set(Array.from({ length: 7 }, (_, p) => 34 + (p + 1) * PAGE_ROWS));
 export const ITEM_ROWS = [...Array.from({ length: 13 }, (_, i) => 8 + i), ...Array.from({ length: 154 }, (_, i) => 35 + i)];
 
 
@@ -79,7 +82,7 @@ const md = (t?: number) => {
 };
 
 /** 양식 워크북에 청구서 내용을 채운다 (워크북을 그대로 고쳐 쓴다) */
-export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSummary, logo?: ArrayBuffer, signs?: Map<string, string>, catNames?: Map<string, string>): { truncated: number } {
+export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSummary, logo?: ArrayBuffer, signs?: Map<string, string>, catNames?: Map<string, string>, cats?: SiteCategory[]): { truncated: number } {
   const ws = wb.getWorksheet('청구서') ?? wb.worksheets[0];
   if (logo) {
     // 회사 로고 (양식 왼쪽 위)
@@ -117,14 +120,36 @@ export function fillReqForm(wb: ExcelJS.Workbook, req: Requisition, sum: ReqSumm
     const textW = [...t7].reduce((a, ch) => a + (/[\u1100-\u11ff\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch) ? 1.9 : 1), 0);
     if (textW > width - 1) c7.font = { ...(c7.font ?? {}), size: 8 };
   }
-  lines.slice(0, ITEM_ROWS.length).forEach((l, i) => {
+  // 1식 분류(소모잡자재·안전장비류·가설공사 등): E '1식' · F 금액 · G 비움, 붙어 있는 같은 분류는 E·F·G 칸 합치기 (쪽이 바뀌면 끊음)
+  const shown = lines.slice(0, ITEM_ROWS.length);
+  const lumps = lumpCells(shown, cats ?? [], (i) => ITEM_ROWS[i] !== ITEM_ROWS[i - 1] + 1 || PAGE_BREAK_AFTER.has(ITEM_ROWS[i - 1]));
+  shown.forEach((l, i) => {
     const r = ITEM_ROWS[i];
     set(`B${r}`, l.itemName);
     set(`C${r}`, l.spec || null);
     set(`D${r}`, l.unit || null);
-    set(`E${r}`, n(l.contractQty));
-    set(`F${r}`, n(l.contractPrice));
-    set(`G${r}`, n(l.execQty));
+    const lp = lumps[i];
+    if (lp) {
+      if (lp.span > 0) {
+        set(`E${r}`, '1식');
+        set(`F${r}`, lp.amount || null);
+        set(`G${r}`, null);
+        if (lp.span > 1) {
+          const r2 = ITEM_ROWS[i + lp.span - 1];
+          for (const col of ['E', 'F', 'G']) {
+            for (let rr = r + 1; rr <= r2; rr++) ws.getCell(`${col}${rr}`).value = null;
+            ws.mergeCells(`${col}${r}:${col}${r2}`);
+            const cc = ws.getCell(`${col}${r}`);
+            cc.style = JSON.parse(JSON.stringify(cc.style ?? {}));
+            cc.alignment = { ...(cc.alignment ?? {}), vertical: 'middle', horizontal: col === 'E' ? 'center' : 'right' };
+          }
+        } else ws.getCell(`E${r}`).alignment = { ...(ws.getCell(`E${r}`).alignment ?? {}), horizontal: 'center', vertical: 'middle' };
+      }
+    } else {
+      set(`E${r}`, n(l.contractQty));
+      set(`F${r}`, n(l.contractPrice));
+      set(`G${r}`, n(l.execQty));
+    }
     set(`H${r}`, n(l.priorQty));
     if (l.hhCount && l.hhCount > 0) {
       // 세대 청구: 윗줄 세대수, 아랫줄 총 수량
