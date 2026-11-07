@@ -96,8 +96,8 @@ export default function VendorRfq() {
                 return (
                   <tr key={l.key}>
                     <td className="text-muted">{i + 1}</td>
-                    <td className="font-medium">{l.itemName}</td>
-                    <td>{l.spec}</td>
+                    <td className="font-medium text-center">{l.itemName}</td>
+                    <td className="text-center">{l.spec}</td>
                     <td>{l.unit}</td>
                     <td className="num">{l.qty ? l.qty.toLocaleString() : ''}</td>
                     <td>{closed ? <span className="block text-right">{v.price ? won(v.price) : ''}</span> : <NumInput className="input h-7 w-full px-1.5 text-right" value={v.price} onChange={(n) => set({ price: n })} />}</td>
@@ -162,7 +162,7 @@ export default function VendorRfq() {
                   <td className="font-semibold text-navy-900">{r.rfqNo}</td>
                   <td>{r.title}</td>
                   <td>{r.siteName}</td>
-                  <td className="text-muted">
+                  <td className="text-muted text-center">
                     {r.lines[0]?.itemName} {r.lines.length > 1 && `외 ${r.lines.length - 1}건`}
                   </td>
                   <td>

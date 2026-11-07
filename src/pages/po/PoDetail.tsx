@@ -344,8 +344,8 @@ export default function PoDetail() {
                 const set = (patch: Partial<(typeof lineEdit.rows)[number]>) => setLineEdit({ rows: lineEdit.rows.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
                 return (
                   <tr key={poLineKey(r.l)} className={r.del ? 'text-muted line-through' : ''}>
-                    <td>{r.l.itemName}</td>
-                    <td>{r.l.spec}</td>
+                    <td className="text-center">{r.l.itemName}</td>
+                    <td className="text-center">{r.l.spec}</td>
                     <td>{r.l.unit}</td>
                     <td className="num">{got ? got.toLocaleString() : ''}</td>
                     <td className="num">
@@ -563,8 +563,8 @@ export function PoSheet({
           {po.lines.map((l, i) => (
             <tr key={i}>
               <td className={`${cell} text-center`}>{i + 1}</td>
-              <td className={cell}>{l.itemName}</td>
-              <td className={cell}>{l.spec}</td>
+              <td className={`${cell} text-center`}>{l.itemName}</td>
+              <td className={`${cell} text-center`}>{l.spec}</td>
               <td className={`${cell} text-center`}>{l.unit}</td>
               <td className={`${cell} text-right tabular-nums`}>{l.qty.toLocaleString()}</td>
               {showPrice && <td className={`${cell} text-right tabular-nums`}>{l.price ? won(l.price) : ''}</td>}

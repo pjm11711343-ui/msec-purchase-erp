@@ -541,8 +541,8 @@ export default function BillMonth() {
                               {x.r.vendorName}
                             </td>
                             <td className="whitespace-nowrap">{x.r.date}</td>
-                            <td>{x.r.itemName}</td>
-                            <td className="text-[12px]">{x.r.spec}</td>
+                            <td className="text-center">{x.r.itemName}</td>
+                            <td className="text-[12px] text-center">{x.r.spec}</td>
                             <td className="num">
                               {x.r.qty.toLocaleString()}
                               <span className="ml-0.5 text-[11px] text-muted">

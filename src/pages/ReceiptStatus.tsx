@@ -208,8 +208,8 @@ export default function ReceiptStatus() {
                     <td>{r.siteName}</td>
                     <td>{r.vendorName}</td>
                     <td>{r.poNo}</td>
-                    <td>{r.itemName}</td>
-                    <td>{r.spec}</td>
+                    <td className="text-center">{r.itemName}</td>
+                    <td className="text-center">{r.spec}</td>
                     <td className="num">
                       {r.qty.toLocaleString()} {r.unit}
                     </td>

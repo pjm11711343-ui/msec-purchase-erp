@@ -368,8 +368,8 @@ function ItemsTab({ rows, office, who, std, catalogAt, onCompare, toast }: { row
                       />
                     </td>
                   )}
-                  <td className="font-medium">{r.itemName}</td>
-                  <td>{r.spec}</td>
+                  <td className="font-medium text-center">{r.itemName}</td>
+                  <td className="text-center">{r.spec}</td>
                   <td>{r.unit}</td>
                   <td className="max-w-[160px] text-[12px]" title={r.makers.join(', ')}>
                     {r.makers.slice(0, 2).join(', ')}
@@ -732,7 +732,7 @@ function PricesTab({ list, rows, vendors, sites, office, who, onCompare, toast }
                       {p.itemName}
                     </button>
                   </td>
-                  <td>{p.spec}</td>
+                  <td className="text-center">{p.spec}</td>
                   <td>{p.unit}</td>
                   <td className="text-[12px]">{p.maker}</td>
                   <td>{p.vendorName}</td>

@@ -190,7 +190,7 @@ export default function ReqList() {
                         </Link>
                       </td>
                       <td>{r.siteName}</td>
-                      <td className="max-w-[260px] truncate">
+                      <td className="max-w-[260px] truncate text-center">
                         {r.lines[0]?.itemName}
                         {r.lines.length > 1 && ` 외 ${r.lines.length - 1}건`}
                       </td>
@@ -310,7 +310,7 @@ export default function ReqList() {
                     </td>
                     <td>{r.siteName}</td>
                     <td className="whitespace-nowrap">{r.processName ? <span className="chip bg-navy-950/5 text-navy-900">{r.processName}</span> : <span className="text-muted">-</span>}</td>
-                    <td className="max-w-[320px] truncate text-muted">
+                    <td className="max-w-[320px] truncate text-muted text-center">
                       {r.lines[0]?.itemName}
                       {r.lines.length > 1 && ` 외 ${r.lines.length - 1}건`}
                     </td>

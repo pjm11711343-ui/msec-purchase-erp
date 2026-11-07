@@ -245,8 +245,8 @@ export default function Reconcile() {
                                   const dd = i.invAmt - i.erpAmt;
                                   return (
                                     <tr key={i.key}>
-                                      <td>{i.itemName}</td>
-                                      <td>{i.spec}</td>
+                                      <td className="text-center">{i.itemName}</td>
+                                      <td className="text-center">{i.spec}</td>
                                       <td>{i.unit}</td>
                                       <td className={`num ${qBad ? 'font-bold text-red-600' : ''}`}>{i.erpQty.toLocaleString()}</td>
                                       <td className={`num ${qBad ? 'font-bold text-red-600' : ''}`}>{i.invQty.toLocaleString()}</td>

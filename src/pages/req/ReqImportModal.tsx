@@ -131,8 +131,8 @@ export default function ReqImportModal({
                   <td>
                     <input type="checkbox" readOnly checked={!off.has(l.key)} />
                   </td>
-                  <td>{l.itemName}</td>
-                  <td>{l.spec}</td>
+                  <td className="text-center">{l.itemName}</td>
+                  <td className="text-center">{l.spec}</td>
                   <td>{l.unit}</td>
                   <td className="num text-muted">{l.reqQty ? l.reqQty.toLocaleString() : ''}</td>
                   <td>{l.vendorName}</td>

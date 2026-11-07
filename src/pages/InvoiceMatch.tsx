@@ -216,8 +216,8 @@ export default function InvoiceMatch() {
                       </td>
                       <td className="whitespace-nowrap">{l.receivedDate}</td>
                       <td className="whitespace-nowrap text-muted">{l.orderDate}</td>
-                      <td>{l.itemName}</td>
-                      <td>{l.spec}</td>
+                      <td className="text-center">{l.itemName}</td>
+                      <td className="text-center">{l.spec}</td>
                       <td className="num">{lineQty(l).toLocaleString()}</td>
                       <td className="num">{won(linePrice(l))}</td>
                       <td className="num">{won(l.finalAmount)}</td>

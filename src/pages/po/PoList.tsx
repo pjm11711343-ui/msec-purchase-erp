@@ -305,8 +305,8 @@ export default function PoList() {
                         </td>
                         <td>{p.siteName}</td>
                         <td>{p.vendorName}</td>
-                        <td>{p.itemName}</td>
-                        <td>{p.spec}</td>
+                        <td className="text-center">{p.itemName}</td>
+                        <td className="text-center">{p.spec}</td>
                         <td className="num">{p.qty.toLocaleString()}</td>
                         <td className="num">{won(cur)}</td>
                         <td className="num font-semibold">{won(p.price)}</td>
@@ -362,8 +362,8 @@ export default function PoList() {
                           </Link>
                         </td>
                         <td>{p.vendorName}</td>
-                        <td>{p.itemName}</td>
-                        <td>{p.spec}</td>
+                        <td className="text-center">{p.itemName}</td>
+                        <td className="text-center">{p.spec}</td>
                         <td className="num text-muted">{p.oldPrice ? won(p.oldPrice) : '-'}</td>
                         <td className="num">{won(p.price)}</td>
                         <td>
@@ -434,8 +434,8 @@ export default function PoList() {
                                       </span>
                                     )}
                                   </td>
-                                  <td>{p.line.itemName}</td>
-                                  <td>{p.line.spec}</td>
+                                  <td className="text-center">{p.line.itemName}</td>
+                                  <td className="text-center">{p.line.spec}</td>
                                   <td>{p.line.unit}</td>
                                   <td className="num">{qty.toLocaleString()}</td>
                                   <td className={`num ${p.line.orderPrice ? '' : 'text-amber-700'}`}>{p.line.orderPrice ? won(p.line.orderPrice) : '단가 없음'}</td>
@@ -499,7 +499,7 @@ export default function PoList() {
                     </td>
                     <td>{p.siteName}</td>
                     <td>{p.vendorName}</td>
-                    <td className="max-w-[280px] truncate text-muted">
+                    <td className="max-w-[280px] truncate text-muted text-center">
                       {p.lines[0]?.itemName}
                       {p.lines.length > 1 && ` 외 ${p.lines.length - 1}건`}
                     </td>

@@ -181,8 +181,8 @@ export default function VendorStatement() {
                       {carryOf(r) > 0 && <span className="chip ml-1 bg-sky-50 text-sky-700">이월({autoBillMonth(r.date)}분)</span>}
                     </td>
                     <td>{r.poNo}</td>
-                    <td>{r.itemName}</td>
-                    <td>{r.spec}</td>
+                    <td className="text-center">{r.itemName}</td>
+                    <td className="text-center">{r.spec}</td>
                     <td className="num">
                       {r.qty.toLocaleString()} {r.unit}
                     </td>

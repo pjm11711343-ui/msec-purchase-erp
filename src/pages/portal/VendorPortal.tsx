@@ -207,7 +207,7 @@ export default function VendorPortal() {
                       <td className="whitespace-nowrap">{p.orderDate}</td>
                       <td className="font-semibold text-navy-900">{p.poNo}</td>
                       <td>{p.siteName}</td>
-                      <td className="max-w-[280px] truncate text-muted">
+                      <td className="max-w-[280px] truncate text-muted text-center">
                         {p.lines[0]?.itemName}
                         {p.lines.length > 1 && ` 외 ${p.lines.length - 1}건`}
                       </td>

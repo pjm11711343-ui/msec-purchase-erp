@@ -303,8 +303,8 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
                   />
                 )}
               </td>
-              <td>{r.l.itemName}</td>
-              <td>{r.l.spec}</td>
+              <td className="text-center">{r.l.itemName}</td>
+              <td className="text-center">{r.l.spec}</td>
               <td>{r.l.unit}</td>
               <td className="num">{r.l.qty.toLocaleString()}</td>
               {showPrice && (
@@ -422,8 +422,8 @@ export default function ReceiptPanel({ po, receipts, prices = [], billed }: { po
             {mine.map((r) => (
               <tr key={r.id} className={r.qty < 0 ? 'bg-red-50/50' : ''}>
                 <td className="whitespace-nowrap">{r.date}</td>
-                <td>{r.itemName}</td>
-                <td>{r.spec}</td>
+                <td className="text-center">{r.itemName}</td>
+                <td className="text-center">{r.spec}</td>
                 <td className={`num ${r.qty < 0 ? 'font-semibold text-red-600' : ''}`}>
                   {r.qty < 0 && <span className="chip mr-1 bg-red-100 text-red-700">반품</span>}
                   {r.qty.toLocaleString()} {r.unit}

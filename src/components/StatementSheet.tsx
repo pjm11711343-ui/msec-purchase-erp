@@ -54,8 +54,8 @@ export function StatementSheet({ inv, siteName }: { inv: Invoice; siteName: stri
             <tr key={i}>
               <td style={{ ...cell, textAlign: 'center' }}>{i + 1}</td>
               <td style={{ ...cell, whiteSpace: 'nowrap' }}>{l.receivedDate ?? ''}</td>
-              <td style={cell}>{l.itemName}</td>
-              <td style={cell}>{l.spec}</td>
+              <td style={{ ...cell, textAlign: 'center' }}>{l.itemName}</td>
+              <td style={{ ...cell, textAlign: 'center' }}>{l.spec}</td>
               <td style={{ ...cell, textAlign: 'center' }}>{l.unit}</td>
               <td style={num}>{(l.changedQty ?? l.qty)?.toLocaleString()}</td>
               <td style={num}>{won(l.changedPrice ?? l.unitPrice)}</td>

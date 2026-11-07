@@ -102,7 +102,7 @@ function RfqList() {
                     </td>
                     <td>{r.title}</td>
                     <td>{r.siteName}</td>
-                    <td className="max-w-[280px] truncate text-muted">
+                    <td className="max-w-[280px] truncate text-muted text-center">
                       {r.lines[0]?.itemName} {r.lines[0]?.spec}
                       {r.lines.length > 1 && ` 외 ${r.lines.length - 1}건`}
                     </td>
@@ -673,8 +673,8 @@ function RfqDetail({ id }: { id: string }) {
                   const set = (p: Partial<QuoteLine>) => setEntry({ ...entry, lines: { ...entry.lines, [l.key]: { ...cur, ...p } } });
                   return (
                     <tr key={l.key}>
-                      <td>{l.itemName}</td>
-                      <td>{l.spec}</td>
+                      <td className="text-center">{l.itemName}</td>
+                      <td className="text-center">{l.spec}</td>
                       <td className="num">{l.qty ? l.qty.toLocaleString() : ''}</td>
                       <td>
                         <NumInput className="input h-7 w-full px-1.5 text-right" value={cur.price} onChange={(n) => set({ price: n })} />
@@ -805,8 +805,8 @@ export function RfqSheet({ rfq, vendorName }: { rfq: Rfq; vendorName: string }) 
           {rfq.lines.map((l, i) => (
             <tr key={l.key}>
               <td className={`${cell} text-center`}>{i + 1}</td>
-              <td className={cell}>{l.itemName}</td>
-              <td className={cell}>{l.spec}</td>
+              <td className={`${cell} text-center`}>{l.itemName}</td>
+              <td className={`${cell} text-center`}>{l.spec}</td>
               <td className={`${cell} text-center`}>{l.unit}</td>
               <td className={`${cell} text-right`}>{l.qty ? l.qty.toLocaleString() : ''}</td>
               <td className={cell} />

@@ -687,8 +687,8 @@ export default function Invoices() {
                 <tr key={i}>
                   <td className="whitespace-nowrap">{l.receivedDate ?? ''}</td>
                   <td className="whitespace-nowrap">{l.orderDate ?? ''}</td>
-                  <td>{l.itemName}</td>
-                  <td>{l.spec}</td>
+                  <td className="text-center">{l.itemName}</td>
+                  <td className="text-center">{l.spec}</td>
                   <td>{l.unit}</td>
                   <td className="num">{(l.changedQty ?? l.qty).toLocaleString()}</td>
                   <td className="num">{won(l.changedPrice ?? l.unitPrice)}</td>

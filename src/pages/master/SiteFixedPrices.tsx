@@ -281,8 +281,8 @@ export default function SiteFixedPrices({ list, rows, catalog, vendors, sites, o
                 const diff = p && r.inv ? r.inv.p - p.price : 0;
                 return (
                   <tr key={r.key} className={p && !priceValid(p) ? 'text-muted' : ''}>
-                    <td>{r.itemName}</td>
-                    <td className="text-[12px]">{r.spec}</td>
+                    <td className="text-center">{r.itemName}</td>
+                    <td className="text-[12px] text-center">{r.spec}</td>
                     <td>{r.unit}</td>
                     <td>{p ? p.vendorName : <span className="text-[12px] text-muted">-</span>}</td>
                     <td className="num font-semibold text-violet-800">

@@ -758,7 +758,7 @@ function PivotTable({
                     </span>
                   )}
                 </td>
-                <td className="whitespace-nowrap">{it.spec}</td>
+                <td className="whitespace-nowrap text-center">{it.spec}</td>
                 <td className="text-muted">{it.unit}</td>
                 {showSite && <td className="whitespace-nowrap">{it.sites.size > 1 ? <span className="chip bg-canvas">{it.sites.size}개 현장</span> : [...it.sites][0]}</td>}
                 {showCat && <td className="whitespace-nowrap">{it.cat}</td>}
@@ -1116,7 +1116,7 @@ function LedgerTable({ rows }: { rows: LRow[] }) {
             <td className={`whitespace-nowrap ${r.cat === UNCAT ? 'text-amber-700' : ''}`}>{r.cat}</td>
             <td className="whitespace-nowrap">{r.vendor}</td>
             <td>{r.item}</td>
-            <td className="whitespace-nowrap">{r.spec}</td>
+            <td className="whitespace-nowrap text-center">{r.spec}</td>
             <td className="num">
               {fmtQ(r.qty)} {r.unit}
             </td>

@@ -417,12 +417,12 @@ function SheetTab({ m, siteId, cells, cell, setCell, sheets, reqs, office, who, 
                 const remain = base - pq;
                 return (
                   <tr key={l.key} className={l.off ? 'text-muted line-through' : ''}>
-                    <td className="font-medium">
+                    <td className="font-medium text-center">
                       {l.itemName}
                       {l.added && <span className="chip ml-1 bg-sky-50 text-sky-700">추가</span>}
                       {l.lump && <span className="chip ml-1 bg-canvas text-muted">1식</span>}
                     </td>
-                    <td>{l.spec}</td>
+                    <td className="text-center">{l.spec}</td>
                     <td>{l.unit}</td>
                     <td className="num">{l.lump ? '' : l.contractQty.toLocaleString()}</td>
                     <td className="num">{l.lump ? '' : won(l.contractPrice)}</td>

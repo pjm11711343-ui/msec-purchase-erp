@@ -248,8 +248,8 @@ export default function Prices() {
                       <tr key={i}>
                         <td>{r.vendorName}</td>
                         <td className={`text-[12px] ${catOf(r) === NO_CAT ? 'text-muted' : ''}`}>{catOf(r)}</td>
-                        <td>{r.itemName}</td>
-                        <td>{r.spec}</td>
+                        <td className="text-center">{r.itemName}</td>
+                        <td className="text-center">{r.spec}</td>
                         <td>{r.unit}</td>
                         <td className="num">{r.listPrice ? won(r.listPrice) : ''}</td>
                         <td className="num">{r.negoRate ? `${r.negoRate}%` : ''}</td>
