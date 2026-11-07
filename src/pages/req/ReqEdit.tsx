@@ -1431,7 +1431,7 @@ export default function ReqEdit() {
                 {adminMemo.isAdmin && <col style={{ width: '9%' }} />}
                 <col style={{ width: editable ? 46 : 36 }} />
               </colgroup>
-              <thead className="text-center">
+              <thead className="text-center [&_th]:!text-center [&_th]:align-middle">
                 <tr>
                   <th rowSpan={2}>#</th>
                   <th rowSpan={2} className="text-center">품 명</th>
