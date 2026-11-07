@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../auth/AuthContext';
-import { audit, commitBatch } from '../../lib/db';
+import { audit, commitBatch, fetchWhere } from '../../lib/db';
 import { C } from '../../lib/firebase';
 import { useSiteCategories, useSites, useStandardCategories } from '../../lib/hooks';
 import { itemKey } from '../../lib/itemMaster';
@@ -135,7 +135,7 @@ export default function ProcessBoard() {
       ) : tab === 'sheet' ? (
         <SheetTab key={siteId} m={m} siteId={siteId} cells={cells} cell={cell} setCell={(c) => set({ cell: c })} sheets={sheets.data} reqs={reqs.data} office={office} who={who} toast={toast} onNew={(z, t) => nav(`/req/new?site=${siteId}&zone=${z}&trade=${t}`)} />
       ) : tab === 'setup' ? (
-        <SetupTab key={siteId} m={m} siteId={siteId} sproc={sproc.data} sheets={sheets.data} toast={toast} />
+        <SetupTab key={siteId} m={m} siteId={siteId} sproc={sproc.data} sheets={sheets.data} reqs={reqs.data} toast={toast} />
       ) : (
         <ImportTab key={siteId} m={m} siteId={siteId} siteName={site?.name ?? ''} sproc={sproc.data} sheets={sheets.data} who={who} toast={toast} onDone={() => set({ tab: 'board' })} />
       )}
@@ -525,9 +525,14 @@ function SheetTab({ m, siteId, cells, cell, setCell, sheets, reqs, office, who, 
   );
 }
 
-/* ───────── 공정 설정 ───────── */
-function SetupTab({ m, siteId, sproc, sheets, toast }: { m: ProcessMaster; siteId: string; sproc?: SiteProcess; sheets: BaseSheet[]; toast: Toast }) {
+/* ───────── 공정 설정 ─────────
+ *  - 이 현장에서 쓰는 칸(구역 × 공종) 켜고 끄기
+ *  - 구역·공종·세부 위치 추가·삭제 (회사 전체 구역·공종 목록에 반영)
+ *  - 어느 현장이든 내역(기본 청구서)이나 청구서가 있으면 삭제 막기 */
+function SetupTab({ m, siteId, sproc, sheets, reqs, toast }: { m: ProcessMaster; siteId: string; sproc?: SiteProcess; sheets: BaseSheet[]; reqs: Requisition[]; toast: Toast }) {
   const [cells, setCells] = useState<string[]>(sproc?.cells ?? defaultCells(m));
+  const [adding, setAdding] = useState<{ kind: 'zone' | 'trade' | 'sub'; zoneId?: string; name: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   const zones = sortedZones(m);
   const trades = sortedTrades(m);
   const toggle = (k: string) => setCells((c) => (c.includes(k) ? c.filter((x) => x !== k) : [...c, k]));
@@ -539,44 +544,177 @@ function SetupTab({ m, siteId, sproc, sheets, toast }: { m: ProcessMaster; siteI
       toast(errMsg(e), 'err');
     }
   };
+  /** 회사 전체 구역·공종 목록 저장 */
+  const saveMaster = async (next: ProcessMaster, what: string, extra: Parameters<typeof commitBatch>[0] = []) => {
+    setBusy(true);
+    try {
+      await commitBatch([{ type: 'set', col: C.processMaster, id: 'main', data: next, merge: false }, ...extra]);
+      await audit('구역·공종 변경', what);
+      return true;
+    } catch (e) {
+      toast(errMsg(e), 'err');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 7)}`;
+
+  const add = async () => {
+    if (!adding) return;
+    const name = adding.name.trim();
+    if (!name) return toast('이름을 입력하세요.', 'err');
+    if (adding.kind === 'zone') {
+      if (m.zones.some((z) => nameKey(z.name) === nameKey(name))) return toast('같은 이름의 구역이 있습니다.', 'err');
+      const z = { id: uid('z'), name, order: Math.max(0, ...m.zones.map((x) => x.order)) + 1, keywords: [name], defaultTrades: [] as string[] };
+      if (await saveMaster({ ...m, zones: [...m.zones, z] }, `구역 추가: ${name}`)) toast(`구역 "${name}"을(를) 추가했습니다. 이 현장에서 쓸 공종 칸을 체크하고 [저장]을 누르세요.`);
+    } else if (adding.kind === 'trade') {
+      if (m.trades.some((t) => nameKey(t.name) === nameKey(name))) return toast('같은 이름의 공종이 있습니다.', 'err');
+      const t = { id: uid('t'), name, order: Math.max(0, ...m.trades.map((x) => x.order)) + 1, keywords: [name] };
+      if (await saveMaster({ ...m, trades: [...m.trades, t] }, `공종 추가: ${name}`)) toast(`공종 "${name}"을(를) 추가했습니다. 쓸 구역 칸을 체크하고 [저장]을 누르세요.`);
+    } else {
+      const z = m.zones.find((x) => x.id === adding.zoneId);
+      if (!z) return;
+      const names = name.split(/[,·]+/).map((x) => x.trim()).filter((x) => x && !(z.subs ?? []).includes(x));
+      if (!names.length) return toast('이미 있는 세부 위치입니다.', 'err');
+      if (await saveMaster({ ...m, zones: m.zones.map((x) => (x.id === z.id ? { ...x, subs: [...(x.subs ?? []), ...names] } : x)) }, `세부 위치 추가: ${z.name} ${names.join(', ')}`)) toast(`${z.name}에 세부 위치 ${names.join(', ')}을(를) 추가했습니다.`);
+    }
+    setAdding(null);
+  };
+
+  /** 어느 현장이든 쓰고 있는지: 내역(기본 청구서)·청구서 */
+  const usage = async (field: 'zoneId' | 'tradeId', id: string) => {
+    const shs = await fetchWhere<BaseSheet>(C.baseSheets, field, id);
+    const rs = reqs.filter((r) => r[field] === id);
+    const siteNames = [...new Set(rs.map((r) => r.siteName).filter(Boolean))];
+    return { sheets: shs.filter((x) => x.lines?.length).length, reqs: rs.length, siteNames };
+  };
+  const delZone = async (zid: string) => {
+    const z = m.zones.find((x) => x.id === zid);
+    if (!z) return;
+    setBusy(true);
+    const u = await usage('zoneId', zid).finally(() => setBusy(false));
+    if (u.sheets || u.reqs) return toast(`"${z.name}"은(는) 내역 ${u.sheets}개 · 청구서 ${u.reqs}건에서 쓰고 있어 삭제할 수 없습니다${u.siteNames.length ? ` (${u.siteNames.slice(0, 3).join(', ')}${u.siteNames.length > 3 ? ' 외' : ''})` : ''}. 이 현장에서만 안 쓰려면 칸 체크를 끄세요.`, 'err');
+    if (!confirm(`구역 "${z.name}"을(를) 회사 전체 목록에서 삭제할까요? 모든 현장 공정 설정에서 빠집니다.`)) return;
+    if (await saveMaster({ ...m, zones: m.zones.filter((x) => x.id !== zid) }, `구역 삭제: ${z.name}`)) {
+      setCells((c) => c.filter((k) => !k.startsWith(`${zid}|`)));
+      toast(`구역 "${z.name}"을(를) 삭제했습니다.`);
+    }
+  };
+  const delTrade = async (tid: string) => {
+    const t = m.trades.find((x) => x.id === tid);
+    if (!t) return;
+    setBusy(true);
+    const u = await usage('tradeId', tid).finally(() => setBusy(false));
+    if (u.sheets || u.reqs) return toast(`"${t.name}"은(는) 내역 ${u.sheets}개 · 청구서 ${u.reqs}건에서 쓰고 있어 삭제할 수 없습니다${u.siteNames.length ? ` (${u.siteNames.slice(0, 3).join(', ')}${u.siteNames.length > 3 ? ' 외' : ''})` : ''}. 이 현장에서만 안 쓰려면 칸 체크를 끄세요.`, 'err');
+    if (!confirm(`공종 "${t.name}"을(를) 회사 전체 목록에서 삭제할까요? 모든 현장 공정 설정에서 빠집니다.`)) return;
+    if (await saveMaster({ ...m, trades: m.trades.filter((x) => x.id !== tid), zones: m.zones.map((z) => ({ ...z, defaultTrades: z.defaultTrades.filter((x) => x !== tid) })) }, `공종 삭제: ${t.name}`)) {
+      setCells((c) => c.filter((k) => !k.endsWith(`|${tid}`)));
+      toast(`공종 "${t.name}"을(를) 삭제했습니다.`);
+    }
+  };
+  const delSub = async (zid: string, sub: string) => {
+    const z = m.zones.find((x) => x.id === zid);
+    if (!z) return;
+    const n = reqs.filter((r) => r.zoneId === zid && r.zoneSub === sub).length;
+    if (n) return toast(`"${z.name} · ${sub}"은(는) 청구서 ${n}건에서 쓰고 있어 삭제할 수 없습니다.`, 'err');
+    if (!confirm(`${z.name}의 세부 위치 "${sub}"을(를) 삭제할까요?`)) return;
+    if (await saveMaster({ ...m, zones: m.zones.map((x) => (x.id === zid ? { ...x, subs: (x.subs ?? []).filter((y) => y !== sub) } : x)) }, `세부 위치 삭제: ${z.name} ${sub}`)) toast('삭제했습니다.');
+  };
+
   return (
-    <div className="card max-w-3xl overflow-hidden">
-      <div className="flex items-center border-b border-line px-4 py-2.5">
+    <div className="card max-w-5xl overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <span className="font-semibold">이 현장에서 쓰는 공정</span>
-        <button className="btn-primary ml-auto h-7 text-[12px]" onClick={save}>
-          저장
-        </button>
+        <div className="ml-auto flex flex-wrap gap-1.5">
+          <button className="btn-ghost h-7 text-[12px]" disabled={busy} onClick={() => setAdding({ kind: 'zone', name: '' })}>
+            + 구역
+          </button>
+          <button className="btn-ghost h-7 text-[12px]" disabled={busy} onClick={() => setAdding({ kind: 'trade', name: '' })}>
+            + 공종
+          </button>
+          <button className="btn-primary h-7 text-[12px]" onClick={save}>
+            저장
+          </button>
+        </div>
       </div>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>구역</th>
-            {trades.map((t) => (
-              <th key={t.id} className="text-center">
-                {t.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {zones.map((z) => (
-            <tr key={z.id}>
-              <td className="font-medium">{z.name}</td>
-              {trades.map((t) => {
-                const k = cellKey(z.id, t.id);
-                const n = sheets.find((s) => s.zoneId === z.id && s.tradeId === t.id)?.lines.length ?? 0;
-                return (
-                  <td key={t.id} className="text-center">
-                    <input type="checkbox" checked={cells.includes(k)} onChange={() => toggle(k)} />
-                    {n > 0 && <div className="text-[10.5px] text-muted">내역 {n}</div>}
-                  </td>
-                );
-              })}
+      {adding && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-amber-soft/40 px-4 py-2 text-[12.5px]">
+          <span className="font-semibold">{adding.kind === 'zone' ? '새 구역' : adding.kind === 'trade' ? '새 공종' : `${m.zones.find((z) => z.id === adding.zoneId)?.name} 세부 위치`}</span>
+          <input
+            autoFocus
+            className="input h-7 w-56"
+            placeholder={adding.kind === 'zone' ? '예: 펌프실' : adding.kind === 'trade' ? '예: 가스' : '예: 1층, 2층 (쉼표로 여러 개)'}
+            value={adding.name}
+            onChange={(e) => setAdding({ ...adding, name: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+          />
+          <button className="btn-primary h-7 text-[12px]" disabled={busy} onClick={add}>
+            추가
+          </button>
+          <button className="btn-ghost h-7 text-[12px]" onClick={() => setAdding(null)}>
+            취소
+          </button>
+          <span className="text-[11.5px] text-muted">회사 전체 구역·공종 목록에 추가되어 다른 현장에서도 쓸 수 있습니다.</span>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>구역</th>
+              {trades.map((t) => (
+                <th key={t.id} className="whitespace-nowrap text-center">
+                  {t.name}
+                  <button className="ml-1 text-[11px] font-normal text-muted hover:text-red-600" title="공종 삭제 (회사 전체)" disabled={busy} onClick={() => delTrade(t.id)}>
+                    ×
+                  </button>
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="border-t border-line px-4 py-2 text-[12px] text-muted">끈 칸은 현황판·청구서 공정 목록에서 빠집니다. 내역과 지난 청구서는 지워지지 않습니다.</div>
+          </thead>
+          <tbody>
+            {zones.map((z) => (
+              <tr key={z.id}>
+                <td className="font-medium">
+                  <div className="flex items-center gap-1 whitespace-nowrap">
+                    {z.name}
+                    <button className="text-[11px] font-normal text-muted hover:text-red-600" title="구역 삭제 (회사 전체)" disabled={busy} onClick={() => delZone(z.id)}>
+                      ×
+                    </button>
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                    {(z.subs ?? []).map((sub) => (
+                      <span key={sub} className="chip bg-canvas text-[10.5px] font-normal text-muted">
+                        {sub}
+                        <button className="ml-0.5 hover:text-red-600" title="세부 위치 삭제" onClick={() => delSub(z.id, sub)}>
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    <button className="text-[10.5px] font-normal text-sky-700 hover:underline" onClick={() => setAdding({ kind: 'sub', zoneId: z.id, name: '' })}>
+                      + 세부 위치
+                    </button>
+                  </div>
+                </td>
+                {trades.map((t) => {
+                  const k = cellKey(z.id, t.id);
+                  const n = sheets.find((s) => s.zoneId === z.id && s.tradeId === t.id)?.lines.length ?? 0;
+                  return (
+                    <td key={t.id} className="text-center">
+                      <input type="checkbox" checked={cells.includes(k)} onChange={() => toggle(k)} />
+                      {n > 0 && <div className="text-[10.5px] text-muted">내역 {n}</div>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="border-t border-line px-4 py-2 text-[12px] text-muted">
+        칸 체크는 이 현장에만 적용되고 [저장]을 눌러야 반영됩니다. 끈 칸은 현황판·청구서 공정 목록에서 빠지며 내역과 지난 청구서는 지워지지 않습니다. 구역·공종·세부 위치 추가·삭제(×)는 회사 전체 목록에 바로 반영되고, 어느 현장이든 내역이나 청구서가 있으면 삭제할 수 없습니다.
+      </div>
     </div>
   );
 }
