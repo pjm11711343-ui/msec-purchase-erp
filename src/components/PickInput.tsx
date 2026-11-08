@@ -6,6 +6,9 @@ import { nameKey } from '../lib/normalize';
  * 목록에 있는 값만 고를 수 있는 입력칸.
  * 글자를 치면 목록이 좁혀지고, 목록에서 골라야만 값이 바뀐다. 목록에 없는 글자를 치고 나가면 원래 값으로 돌아간다.
  */
+/** 마지막으로 복사한 값 (클립보드를 못 읽을 때 대신) */
+let pickClip = '';
+
 export default function PickInput({
   value,
   options,
@@ -28,6 +31,15 @@ export default function PickInput({
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
   const ref = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState(false);
+  /** 고른 값 복사: 목록이 열려 입력칸이 비어 있어도 Ctrl+C 로 복사되게 (브라우저가 빈 칸 복사를 무시하는 경우 대비) */
+  const copyValue = () => {
+    if (!value) return;
+    pickClip = value;
+    void navigator.clipboard?.writeText(value).catch(() => undefined);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 900);
+  };
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
 
   const list = useMemo(() => {
@@ -79,6 +91,11 @@ export default function PickInput({
           setHi(0);
         }}
         onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && value && (!q || e.currentTarget.selectionStart === e.currentTarget.selectionEnd)) {
+            e.preventDefault();
+            copyValue();
+            return;
+          }
           if (e.key === 'ArrowDown') (e.preventDefault(), setHi((h) => Math.min(h + 1, list.length - 1)));
           else if (e.key === 'ArrowUp') (e.preventDefault(), setHi((h) => Math.max(h - 1, 0)));
           else if (e.key === 'Enter' && list[hi]) (e.preventDefault(), pick(list[hi]));
@@ -93,7 +110,7 @@ export default function PickInput({
           }
         }}
         onPaste={(e) => {
-          const text = e.clipboardData.getData('text/plain');
+          const text = e.clipboardData.getData('text/plain') || pickClip;
           if (!text) return;
           e.preventDefault();
           const rows = text
@@ -117,6 +134,7 @@ export default function PickInput({
           setTimeout(() => setOpen(false), 120);
         }}
       />
+      {copied && pos && createPortal(<div className="fixed z-[61] rounded bg-navy-950 px-1.5 py-0.5 text-[11px] text-white" style={{ left: pos.left, top: pos.top - 26 }}>복사됨</div>, document.body)}
       {open &&
         pos &&
         createPortal(

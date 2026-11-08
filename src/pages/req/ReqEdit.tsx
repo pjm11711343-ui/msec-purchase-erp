@@ -69,6 +69,8 @@ export default function ReqEdit() {
   const [comment, setComment] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [pickRows, setPickRows] = useState<Set<string>>(new Set()); // 줄 번호를 눌러 고른 줄 (여러 줄 한 번에 붙여넣기)
+  const lastPick = useRef<string | null>(null);
   const [pasteText, setPasteText] = useState('');
   const [phoneTable, setPhoneTable] = useState(false);
   const [preview, setPreview] = useState(false); // 청구서 미리보기
@@ -789,14 +791,38 @@ export default function ReqEdit() {
   const pasteDown = (startKey: string, col: 'item' | 'spec' | 'vendor' | 'cat', rows: string[][]) => {
     const start = d.lines.findIndex((l) => l.key === startKey);
     if (start < 0 || !rows.length) return;
+    // 줄을 여러 개 골라 둔 상태에서 값 하나를 붙여넣으면 고른 줄 모두에
+    if (rows.length === 1 && pickRows.size > 1 && pickRows.has(startKey)) {
+      const targets = d.lines.map((l, i) => (pickRows.has(l.key) ? i : -1)).filter((i) => i >= 0);
+      return pasteAt(targets, col, targets.map(() => rows[0]));
+    }
+    return pasteAt(rows.map((_, i) => start + i), col, rows);
+  };
+  /** 아래로 채우기: 이 줄의 품명·규격(단위)을 아래 줄들에 (빈 줄이 이어지면 거기까지, 없으면 몇 줄인지 물어봄) */
+  const fillDown = (key: string) => {
+    const i = d.lines.findIndex((l) => l.key === key);
+    const src = d.lines[i];
+    if (i < 0 || !src?.itemName) return;
+    let n = 0;
+    while (i + 1 + n < d.lines.length && !d.lines[i + 1 + n].itemName.trim()) n++;
+    if (!n) {
+      const a = prompt(`"${src.itemName} ${src.spec}"을(를) 아래 몇 줄에 채울까요? (모자라면 줄을 추가합니다)`, '1');
+      n = Math.max(0, Math.min(200, Math.floor(Number(a) || 0)));
+      if (!n) return;
+    }
+    const cells = [src.itemName, src.spec];
+    pasteAt(Array.from({ length: n }, (_, k) => i + 1 + k), 'item', Array.from({ length: n }, () => cells));
+    toast(`아래 ${n}줄에 "${src.itemName} ${src.spec}"을(를) 채웠습니다. (되돌리기 Ctrl+Z)`);
+  };
+  const pasteAt = (targets: number[], col: 'item' | 'spec' | 'vendor' | 'cat', rows: string[][]) => {
     const find = (opts: string[], v: string) => (v ? opts.find((o) => nameKey(o) === nameKey(v)) : undefined);
     const lines = [...d.lines];
     const touched: string[] = [];
     let ok = 0;
     let skip = 0;
     rows.forEach((cells, i) => {
-      const idx = start + i;
-      if (idx >= lines.length) lines.push(newLine());
+      const idx = targets[i];
+      while (idx >= lines.length) lines.push(newLine());
       const l = lines[idx];
       const a = cells[0] ?? '';
       const b = cells[1] ?? '';
@@ -824,7 +850,7 @@ export default function ReqEdit() {
     });
     setD((x) => x && { ...x, lines });
     touched.forEach((k) => autoPrice(k));
-    if (rows.length > 1 || skip) toast(`${ok}칸 붙여넣었습니다.${skip ? ` 목록에 없는 ${skip}칸은 건너뛰었습니다 (빨간 칸이 없게 목록 값으로 붙여넣으세요).` : ''}`, skip ? 'err' : undefined);
+    if (targets.length > 1 || skip) toast(`${ok}칸 붙여넣었습니다.${skip ? ` 목록에 없는 ${skip}칸은 건너뛰었습니다 (빨간 칸이 없게 목록 값으로 붙여넣으세요).` : ''}`, skip ? 'err' : undefined);
   };
 
   /** 세대 청구: 세대수·타입 → 금회청구 = 세대수 × 세대당 수량 (발주수량도 같이) */
@@ -1325,6 +1351,14 @@ export default function ReqEdit() {
               <button className="btn-ghost h-7 px-2 text-[12px]" disabled={!keeper.canRedo} title="다시 하기 (Ctrl+Y)" onClick={keeper.redo}>
                 ↷
               </button>
+              {pickRows.size > 0 && (
+                <span className="flex items-center gap-1 rounded-md bg-amber-soft px-2 py-0.5 text-[11.5px] text-amber-900">
+                  {pickRows.size}줄 선택 — 고른 줄의 칸에 Ctrl+V 하면 모두에 들어갑니다
+                  <button className="ml-1 underline" onClick={() => setPickRows(new Set())}>
+                    해제
+                  </button>
+                </span>
+              )}
               <select className="input h-7 w-28 text-[12px]" value="" title="줄 순서 정렬" onChange={(e) => sortLines(e.target.value)}>
                 <option value="">줄 정렬 ▾</option>
                 <option value="item">품명·규격순</option>
@@ -1511,7 +1545,23 @@ export default function ReqEdit() {
                               title="끌어서 줄 순서 바꾸기"
                             >
                               ⋮⋮
-                              <div className="mt-0.5 text-center">{i + 1}</div>
+                              <div
+                                className={`mt-0.5 cursor-pointer rounded text-center ${pickRows.has(l.key) ? 'bg-amber-brand font-bold text-navy-950' : 'hover:bg-amber-soft'}`}
+                                title="눌러서 줄 고르기 (Shift+클릭: 범위) — 고른 줄의 칸에 Ctrl+V 하면 고른 줄 모두에 붙여넣기"
+                                onClick={(e) => {
+                                  const n = new Set(pickRows);
+                                  if (e.shiftKey && lastPick.current) {
+                                    const a = d.lines.findIndex((x) => x.key === lastPick.current);
+                                    const [lo, hi] = a < i ? [a, i] : [i, a];
+                                    d.lines.slice(lo, hi + 1).forEach((x) => n.add(x.key));
+                                  } else if (n.has(l.key)) n.delete(l.key);
+                                  else n.add(l.key);
+                                  lastPick.current = l.key;
+                                  setPickRows(n);
+                                }}
+                              >
+                                {i + 1}
+                              </div>
                             </span>
                             <div className="flex flex-col">
                               <button className="h-4 px-0.5 text-[9px] leading-none hover:text-ink disabled:opacity-30" disabled={i === 0} title="위로" aria-label="위로" onClick={() => moveBy(l.key, -1)}>
@@ -1528,6 +1578,7 @@ export default function ReqEdit() {
                       </td>
                       <td className="text-center [&_input]:text-center">
                         {rowEd ? (
+                          <>
                           <PickInput
                             className="w-full"
                             value={l.itemName}
@@ -1537,6 +1588,12 @@ export default function ReqEdit() {
                             onPick={(v) => pickItem(l.key, v)}
                             onPasteRows={(rows) => pasteDown(l.key, 'item', rows)}
                           />
+                          {l.itemName && (
+                            <button className="float-right -mt-1 text-[10px] leading-none text-sky-700 hover:underline" title="이 품명·규격을 아래 줄에 채우기" onClick={() => fillDown(l.key)}>
+                              ↓채우기
+                            </button>
+                          )}
+                          </>
                         ) : (
                           <span className="break-words">{l.itemName}</span>
                         )}
