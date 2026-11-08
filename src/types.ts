@@ -167,7 +167,7 @@ export interface Settings {
 /** 관리자가 메뉴를 정해 줄 수 있는 역할 */
 export const MENU_ROLES: Role[] = ['executive', 'siteManager', 'siteStaff'];
 /** 역할에 원래 열려 있는 메뉴 (월별 품목은 결재자만) */
-export const menusForRole = (role: Role) => EXEC_MENUS.filter((m) => m.to !== '/items' || role === 'executive');
+export const menusForRole = (role: Role) => EXEC_MENUS.filter((m) => (m.to !== '/items' || role === 'executive') && (m.to !== '/rfq' || role !== 'executive'));
 /** 역할의 공통 메뉴 설정 (없으면 null = 전부) */
 export const roleMenusOf = (s: Partial<Settings> | undefined, role: Role): string[] | null => (role === 'executive' ? s?.execMenus : s?.roleMenus?.[role]) ?? null;
 
@@ -178,6 +178,7 @@ export const EXEC_MENUS: { to: string; label: string; group: string }[] = [
   { to: '/items', label: '월별 품목', group: '현황' },
   { to: '/process', label: '공정별 청구', group: '구매 흐름' },
   { to: '/req', label: '구매청구', group: '구매 흐름' },
+  { to: '/rfq', label: '견적 의뢰', group: '구매 흐름' },
   { to: '/po', label: '발주', group: '구매 흐름' },
   { to: '/receipt', label: '입고 현황', group: '구매 흐름' },
   { to: '/statements', label: '거래명세서', group: '구매 흐름' },

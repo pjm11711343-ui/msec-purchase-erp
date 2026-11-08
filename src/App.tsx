@@ -97,8 +97,8 @@ export default function App() {
         <Route path="bill-month" element={<Guard roles={OFFICE}><BillMonth /></Guard>} />
         <Route path="reconcile" element={<Guard roles={OFFICE}><Reconcile /></Guard>} />
         <Route path="notices" element={<Guard roles={OFFICE}><Notices /></Guard>} />
-        <Route path="rfq" element={<Guard roles={OFFICE}><RfqPage /></Guard>} />
-        <Route path="rfq/:id" element={<Guard roles={OFFICE}><RfqPage /></Guard>} />
+        <Route path="rfq" element={<Guard roles={[...OFFICE, 'siteManager', 'siteStaff']}><RfqPage /></Guard>} />
+        <Route path="rfq/:id" element={<Guard roles={[...OFFICE, 'siteManager', 'siteStaff']}><RfqPage /></Guard>} />
         <Route path="master/items-prices" element={<Guard roles={OFFICE}><ItemsPrices /></Guard>} />
         <Route path="master/req-alias" element={<Guard roles={OFFICE}><ReqAliases /></Guard>} />
         <Route path="master/users" element={<Guard roles={['admin']}><Users /></Guard>} />

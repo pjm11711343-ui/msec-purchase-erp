@@ -51,8 +51,9 @@ export default function RfqPage() {
 
 function RfqList() {
   const toast = useToast();
-  const rfqs = useRfqs();
-  const quotes = useQuotes();
+  const { siteIds } = useAuth();
+  const rfqs = useRfqs(siteIds);
+  const quotes = useQuotes(undefined, siteIds);
   const [q, setQ] = useState('');
   const list = [...rfqs.data].sort((a, b) => b.createdAt - a.createdAt).filter((r) => !q || nameKey([r.rfqNo, r.title, r.siteName, ...r.lines.map((l) => l.itemName)].join(' ')).includes(nameKey(q)));
   return (
@@ -143,16 +144,17 @@ type Draft = Omit<Rfq, 'id'> & { id?: string };
 
 function RfqDetail({ id }: { id: string }) {
   const nav = useNavigate();
-  const { profile } = useAuth();
+  const { profile, siteIds, can } = useAuth();
+  const office = can('admin', 'material'); // 단가표 반영은 자재부·관리자만, 현장은 담당 현장 의뢰서만
   const toast = useToast();
-  const rfqs = useRfqs();
+  const rfqs = useRfqs(siteIds);
   const vendors = useVendors();
   const sites = useSites();
   const std = useStdItems(); // 프로그램 기준 품명·규격 (청구서와 같은 목록)
   const priceList = usePriceList();
   const isNew = id === 'new';
   const stored = rfqs.data.find((r) => r.id === id);
-  const quotes = useQuotes(isNew ? '__none__' : id);
+  const quotes = useQuotes(isNew ? '__none__' : id, siteIds);
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [vq, setVq] = useState('');
@@ -165,8 +167,9 @@ function RfqDetail({ id }: { id: string }) {
   useEffect(() => {
     if (d) return;
     if (isNew && !rfqs.loading) {
-      setD({ rfqNo: nextRfqNo(rfqs.data), title: '', scope: 'common', guide: DEFAULT_RFQ_GUIDE, lines: [{ key: lineKey(), itemName: '', spec: '', unit: '', qty: 0 }], vendorIds: [], status: 'draft', createdAt: Date.now(), createdByName: who, updatedAt: Date.now() });
+      setD({ rfqNo: nextRfqNo(rfqs.data), title: '', ...(office ? { scope: 'common' as const } : { scope: 'site' as const, siteId: sites.data[0]?.id }), guide: DEFAULT_RFQ_GUIDE, lines: [{ key: lineKey(), itemName: '', spec: '', unit: '', qty: 0 }], vendorIds: [], status: 'draft', createdAt: Date.now(), createdByName: who, updatedAt: Date.now() });
     } else if (stored) setD(structuredClone(stored));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, rfqs.loading, rfqs.data, stored, d, who]);
   // 저장된 뒤 다른 곳에서 바뀌면 (작성 중이 아닐 때) 최신으로
   useEffect(() => {
@@ -199,13 +202,14 @@ function RfqDetail({ id }: { id: string }) {
   const save = async (patch: Partial<Rfq> = {}, msg = '저장했습니다.') => {
     const lines = d.lines.filter((l) => l.itemName.trim()).map((l) => ({ ...l, itemName: l.itemName.trim(), spec: l.spec.trim(), unit: l.unit.trim() }));
     if (!lines.length) return toast('품목을 한 줄 이상 넣으세요.', 'err'), null;
+    if (!office && !d.siteId) return toast('현장을 고르세요.', 'err'), null;
     if (patch.status === 'sent' && badCount) return toast(`기준 품명·규격이 아닌 줄이 ${badCount}개 있습니다 (빨간 칸). 목록에서 고르거나 새 품목으로 등록한 뒤 보내세요.`, 'err'), null;
     void learn(lines);
     const rid = d.id ?? newId(C.rfqs);
     const site = sites.data.find((s) => s.id === d.siteId);
     const { id: _x, ...rest } = d;
     void _x;
-    const data = { ...rest, lines, siteName: site?.name ?? '', ...(d.scope === 'site' && !d.siteId ? { scope: 'common' as const } : {}), updatedAt: Date.now(), ...patch };
+    const data = { ...rest, lines, siteName: site?.name ?? '', ...(d.scope === 'site' && !d.siteId ? { scope: 'common' as const } : {}), ...(!office ? { scope: 'site' as const } : {}), updatedAt: Date.now(), ...patch };
     setBusy(true);
     try {
       await commitBatch([{ type: 'set', col: C.rfqs, id: rid, data, merge: false }]);
@@ -268,12 +272,13 @@ function RfqDetail({ id }: { id: string }) {
     if (!entry) return;
     const lines = d.lines.map((l) => ({ key: l.key, price: entry.lines[l.key]?.price || 0, ...(entry.lines[l.key]?.maker ? { maker: entry.lines[l.key].maker } : {}), ...(entry.lines[l.key]?.note ? { note: entry.lines[l.key].note } : {}) }));
     if (!lines.some((l) => l.price > 0)) return toast('단가를 한 줄 이상 넣으세요.', 'err');
-    const q: RfqQuote = { id: quoteId(d.id!, entry.vendor.id), rfqId: d.id!, vendorId: entry.vendor.id, vendorName: entry.vendor.name, lines, status: 'submitted', by: 'office', byName: who, ...(entry.fileName ? { fileName: entry.fileName } : {}), submittedAt: Date.now(), updatedAt: Date.now() };
+    const q: RfqQuote = { id: quoteId(d.id!, entry.vendor.id), rfqId: d.id!, ...(d.siteId ? { siteId: d.siteId } : {}), vendorId: entry.vendor.id, vendorName: entry.vendor.name, lines, status: 'submitted', by: 'office', byName: who, ...(entry.fileName ? { fileName: entry.fileName } : {}), submittedAt: Date.now(), updatedAt: Date.now() };
     try {
       const { id: qid, ...data } = q;
       await commitBatch([{ type: 'set', col: C.rfqQuotes, id: qid, data, merge: false }]);
       setEntry(null);
-      await apply([q]);
+      if (office) await apply([q]);
+      else toast('견적을 입력했습니다. 단가표 반영은 자재부가 합니다.');
     } catch (e) {
       toast(errMsg(e), 'err');
     }
@@ -393,7 +398,7 @@ function RfqDetail({ id }: { id: string }) {
                     마감 풀기
                   </button>
                 )}
-                {unapplied.length > 0 && (
+                {office && unapplied.length > 0 && (
                   <button className="btn-primary" disabled={busy} onClick={() => apply(unapplied)}>
                     받은 견적 {unapplied.length}건 단가표 반영
                   </button>
@@ -413,7 +418,7 @@ function RfqDetail({ id }: { id: string }) {
           </div>
           <Field label="현장 (업체에 보임)">
             <select className="input" disabled={!editable} value={d.siteId ?? ''} onChange={(e) => setD({ ...d, siteId: e.target.value || undefined, ...(e.target.value ? {} : { scope: 'common' }) })}>
-              <option value="">(현장 지정 안 함)</option>
+              {office && <option value="">(현장 지정 안 함)</option>}
               {sites.data.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -442,8 +447,8 @@ function RfqDetail({ id }: { id: string }) {
           <div className="col-span-2">
             <Field label="받은 단가 적용" hint="받은 견적은 전부 품목·단가(ERP 단가표)에 업체별로 들어갑니다.">
               <div className="flex h-8 items-center gap-4 text-[13px]">
-                <label className="flex items-center gap-1">
-                  <input type="radio" disabled={!editable} checked={d.scope === 'common'} onChange={() => setD({ ...d, scope: 'common' })} /> 공통 단가 (모든 현장)
+                <label className={`flex items-center gap-1 ${!office ? 'text-muted' : ''}`}>
+                  <input type="radio" disabled={!editable || !office} checked={d.scope === 'common'} onChange={() => setD({ ...d, scope: 'common' })} /> 공통 단가 (모든 현장)
                 </label>
                 <label className={`flex items-center gap-1 ${!d.siteId ? 'text-muted' : ''}`}>
                   <input type="radio" disabled={!editable || !d.siteId} checked={d.scope === 'site'} onChange={() => setD({ ...d, scope: 'site' })} /> 이 현장 예외 단가

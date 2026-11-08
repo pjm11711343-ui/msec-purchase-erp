@@ -173,7 +173,7 @@ export default async function handler(req: Req, res: Res) {
     }
 
     if (event === 'rfq_sent') {
-      if (!office) throw new HttpError(403, '견적 의뢰 메일은 자재부·관리자만 보낼 수 있습니다.');
+      if (!staff) throw new HttpError(403, '견적 의뢰 메일은 사내 사용자만 보낼 수 있습니다.'); // 의뢰서 읽기 권한(담당 현장)은 아래 조회에서 확인
       const rid = String(body.rfqId ?? '');
       const vid = String(body.vendorId ?? '');
       const rfq = rid && (await getDoc<{ rfqNo: string; title: string; siteName?: string; deliveryPlace?: string; note?: string; guide?: string; lines: { itemName: string; spec?: string; unit?: string; qty: number }[] }>(me.token, `erp_rfqs/${rid}`));

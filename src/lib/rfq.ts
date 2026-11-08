@@ -45,6 +45,7 @@ export interface QuoteLine {
 export interface RfqQuote {
   id: string; // `${rfqId}_${vendorId}`
   rfqId: string;
+  siteId?: string; // 의뢰서 현장 (현장 사용자가 받은 견적을 볼 수 있게)
   vendorId: string;
   vendorName: string;
   lines: QuoteLine[];
@@ -68,11 +69,15 @@ export const DEFAULT_RFQ_GUIDE = [
 
 export const quoteId = (rfqId: string, vendorId: string) => `${rfqId}_${vendorId}`;
 
-export function useRfqs() {
-  return useCollection<Rfq>(C.rfqs);
+/** 견적 의뢰서: 자재부는 전부, 현장 사용자는 담당 현장 것만 (siteIds = null 이면 전부) */
+export function useRfqs(siteIds: string[] | null = null) {
+  const ids = (siteIds ?? []).slice(0, 30);
+  return useCollection<Rfq>(C.rfqs, siteIds === null ? [] : [where('siteId', 'in', ids.length ? ids : ['-'])], siteIds === null ? 'all' : ids.join(','));
 }
-export function useQuotes(rfqId?: string) {
-  return useCollection<RfqQuote>(C.rfqQuotes, rfqId ? [where('rfqId', '==', rfqId)] : [], rfqId ?? 'all');
+export function useQuotes(rfqId?: string, siteIds: string[] | null = null) {
+  const ids = (siteIds ?? []).slice(0, 30);
+  const cons = [...(rfqId ? [where('rfqId', '==', rfqId)] : []), ...(siteIds === null ? [] : [where('siteId', 'in', ids.length ? ids : ['-'])])];
+  return useCollection<RfqQuote>(C.rfqQuotes, cons, `${rfqId ?? 'all'}|${siteIds === null ? '*' : ids.join(',')}`);
 }
 /** 업체 포털: 내게 온 의뢰서 · 내 견적 */
 export function useVendorRfqs(vendorId?: string) {

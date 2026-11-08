@@ -38,7 +38,7 @@ export default function VendorRfq() {
           type: 'set',
           col: C.rfqQuotes,
           id: quoteId(cur.id, vendor.vendorId),
-          data: { rfqId: cur.id, vendorId: vendor.vendorId, vendorName: vendor.vendorName, lines: ls, note, status: submit ? 'submitted' : prev?.status === 'submitted' ? 'submitted' : 'draft', by: 'vendor', ...(submit ? { submittedAt: Date.now() } : {}), updatedAt: Date.now() },
+          data: { rfqId: cur.id, ...(cur.siteId ? { siteId: cur.siteId } : {}), vendorId: vendor.vendorId, vendorName: vendor.vendorName, lines: ls, note, status: submit ? 'submitted' : prev?.status === 'submitted' ? 'submitted' : 'draft', by: 'vendor', ...(submit ? { submittedAt: Date.now() } : {}), updatedAt: Date.now() },
         },
       ]);
       toast(submit ? '견적을 제출했습니다. 감사합니다.' : '임시 저장했습니다.');

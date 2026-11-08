@@ -189,9 +189,12 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
     // 견적 의뢰: 업체는 자기에게 온 의뢰서와 자기 견적만. 마감 전까지 제출·수정, 단가표 반영 표시는 못 바꿈
+    // 견적 의뢰서: 자재부 전부, 현장 사용자는 담당 현장 의뢰서(현장 예외 단가)만
     match /erp_rfqs/{id} {
-      allow read: if isOffice() || (isVendor() && myVendor() in resource.data.vendorIds);
-      allow write: if isOffice();
+      allow read: if isOffice() || (isErp() && hasSite(resource.data.get('siteId', ''))) || (isVendor() && myVendor() in resource.data.vendorIds);
+      allow create: if isOffice() || (isErp() && hasSite(request.resource.data.get('siteId', '')) && request.resource.data.scope == 'site');
+      allow update: if isOffice() || (isErp() && hasSite(resource.data.get('siteId', '')) && hasSite(request.resource.data.get('siteId', '')) && request.resource.data.scope == 'site');
+      allow delete: if isOffice() || (isErp() && hasSite(resource.data.get('siteId', '')));
     }
     // 업체 공지사항: 자재부가 쓰고, 업체는 전체 공지와 자기 업체 지정 공지만 읽는다
     match /erp_notices/{id} {
@@ -205,16 +208,20 @@ service cloud.firestore {
       allow delete: if isOffice();
     }
     match /erp_rfqQuotes/{id} {
-      allow read: if isOffice() || (isVendor() && resource.data.vendorId == myVendor());
-      allow create, update: if isOffice() || (isVendor()
+      allow read: if isOffice() || (isErp() && hasSite(resource.data.get('siteId', ''))) || (isVendor() && resource.data.vendorId == myVendor());
+      allow create, update: if isOffice()
+        || (isErp() && hasSite(request.resource.data.get('siteId', '')) && request.resource.data.by == 'office'
+          && request.resource.data.get('appliedAt', 0) == (resource == null ? 0 : resource.data.get('appliedAt', 0)))
+        || (isVendor()
         && request.resource.data.vendorId == myVendor()
         && id == request.resource.data.rfqId + '_' + myVendor()
         && (resource == null || resource.data.vendorId == myVendor())
         && request.resource.data.get('appliedAt', 0) == (resource == null ? 0 : resource.data.get('appliedAt', 0))
         && request.resource.data.by == 'vendor'
         && get(/databases/$(database)/documents/erp_rfqs/$(request.resource.data.rfqId)).data.status == 'sent'
-        && myVendor() in get(/databases/$(database)/documents/erp_rfqs/$(request.resource.data.rfqId)).data.vendorIds);
-      allow delete: if isOffice();
+        && myVendor() in get(/databases/$(database)/documents/erp_rfqs/$(request.resource.data.rfqId)).data.vendorIds
+        && request.resource.data.get('siteId', '') == get(/databases/$(database)/documents/erp_rfqs/$(request.resource.data.rfqId)).data.get('siteId', ''));
+      allow delete: if isOffice() || (isErp() && hasSite(resource.data.get('siteId', '')));
     }
     match /erp_itemCats/{id} {
       allow read: if isErp();
