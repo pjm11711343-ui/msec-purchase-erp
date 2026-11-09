@@ -43,14 +43,17 @@ async function signIn(): Promise<string> {
   return ((await r.json()) as { idToken: string }).idToken;
 }
 
-async function runQuery(token: string, collectionId: string): Promise<{ name: string; fields: Record<string, FsValue> }[]> {
+async function runQuery(token: string, collectionId: string, group = true): Promise<{ name: string; fields: Record<string, FsValue> }[]> {
   const r = await fetch(`https://firestore.googleapis.com/v1/projects/${P_PROJECT}/databases/(default)/documents:runQuery`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ structuredQuery: { from: [{ collectionId, allDescendants: true }] } }),
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId, allDescendants: group }] } }),
   });
-  if (r.status === 403) throw new HttpError(502, '단가 관리시스템에서 읽기 권한이 없습니다. 관리자 계정인지 확인하세요.');
-  if (!r.ok) throw new HttpError(502, `단가 관리시스템 읽기 실패 (${r.status})`);
+  if (!r.ok) {
+    const j = (await r.json().catch(() => [])) as { error?: { message?: string } }[] | { error?: { message?: string } };
+    const msg = (Array.isArray(j) ? j[0]?.error?.message : j?.error?.message) ?? '';
+    throw new HttpError(502, `단가 관리시스템 ${collectionId === 'vendors' ? '업체' : '단가'} 읽기 실패 (${r.status}${msg ? `: ${msg.slice(0, 160)}` : ''})`);
+  }
   const arr = (await r.json()) as { document?: { name: string; fields?: Record<string, FsValue> } }[];
   return arr.filter((x) => x.document).map((x) => ({ name: x.document!.name, fields: x.document!.fields ?? {} }));
 }
@@ -63,7 +66,8 @@ export default async function handler(req: Req, res: Res) {
     if (!staff?.active || !['admin', 'material'].includes(staff.role)) throw new HttpError(403, '자재부·관리자만 단가를 가져올 수 있습니다.');
 
     const token = await signIn();
-    const [vendors, prices] = await Promise.all([runQuery(token, 'vendors'), runQuery(token, 'prices')]);
+    // 업체: 최상위 vendors 컬렉션 / 단가: 모든 업체의 prices (컬렉션 그룹)
+    const [vendors, prices] = await Promise.all([runQuery(token, 'vendors', false), runQuery(token, 'prices', true)]);
     const vMap = new Map<string, { name: string; bizNo: string }>();
     for (const v of vendors) {
       const parts = v.name.split('/');
