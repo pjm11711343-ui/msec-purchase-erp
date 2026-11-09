@@ -6,6 +6,7 @@ import { commitBatch } from './db';
 import { NO_CAT, stdOfText } from './catMatch';
 import { lineQty } from './matching';
 import { baseKey } from './itemNorm';
+import { nameKey } from './normalize';
 import type { Invoice, Site, SiteCategory, StandardCategory } from '../types';
 
 export interface LRow {
@@ -38,6 +39,7 @@ export function buildRows(
   std: StandardCategory[],
   basis: Basis,
   alias: Record<string, string>,
+  exclude?: Set<string>,
 ): LRow[] {
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
   const catById = new Map(cats.map((c) => [c.id, c]));
@@ -46,7 +48,7 @@ export function buildRows(
   for (const inv of invoices) {
     if (inv.submitted && !inv.appliedToLedger) continue; // 업체 포털 제출만 하고 반영 전 → 엑셀 계산서와 중복 방지
     const site = siteName.get(inv.siteId);
-    if (!site) continue;
+    if (!site || exclude?.has(inv.siteId)) continue;
     for (const l of inv.lines) {
       const raw = (l.categoryText || '').trim();
       const sc = l.siteCategoryId ? catById.get(l.siteCategoryId) : undefined;
@@ -82,6 +84,75 @@ export function buildRows(
     }
   }
   return out;
+}
+
+/* ===== 기계/소방 현장 규칙 ===== */
+const KIND_RE = /\(\s*(기계|소방)\s*\)\s*$/;
+const KIND_IN = /\(\s*(기계|소방)\s*\)/;
+/**
+ * 짝 현장(○○(기계) / ○○(소방))이 있을 때:
+ * 1) 분류에 반대쪽 표시가 붙은 줄은 짝 현장으로 옮긴다 (예: (기계) 현장의 '배관(소방)' → (소방) 현장)
+ * 2) (기계) 현장 분류에는 항상 (기계)를 붙이고, (소방) 현장은 같은 이름의 (소방) 분류가 있을 때만 붙인다
+ *    ('안전장비류 2블럭'처럼 뒤에 블럭이 붙은 분류는 앞부분 기준)
+ */
+export function applyKindRules(rows: LRow[], sites: Site[]): number {
+  const kindOf = (s: Site): string => s.name.match(KIND_RE)?.[1] ?? (s.groupName && s.trade !== '공통' ? s.trade : '');
+  const baseOf = (s: Site) => nameKey(s.groupName || s.name.replace(KIND_RE, ''));
+  const byId = new Map(sites.map((s) => [s.id, s]));
+  const pair = new Map<string, Site>();
+  for (const s of sites) {
+    const k = kindOf(s);
+    if (k) pair.set(`${baseOf(s)}|${k}`, s);
+  }
+  let ch = 0;
+  for (const r of rows) {
+    const s = byId.get(r.siteId);
+    const k = s && kindOf(s);
+    if (!s || !k) continue;
+    const cm = r.cat.match(KIND_IN);
+    if (cm && cm[1] !== k) {
+      const to = pair.get(`${baseOf(s)}|${cm[1]}`);
+      if (to && to.id !== s.id) {
+        r.note = [`현장 이동: ${r.site}→${to.name}`, r.note].filter(Boolean).join(' · ');
+        r.siteId = to.id;
+        r.site = to.name;
+        ch++;
+      }
+    }
+  }
+  const cats = new Set(rows.map((r) => r.cat));
+  for (const r of rows) {
+    const s = byId.get(r.siteId);
+    const k = s && kindOf(s);
+    if (!s || !k || r.cat === UNCAT || KIND_IN.test(r.cat)) continue;
+    const m = r.cat.match(/^(.*?)(\s+\S*블럭)?$/);
+    const head = m?.[1] ?? r.cat;
+    const tail = m?.[2] ?? '';
+    const want = `${head}(${k})`;
+    if (k === '기계' || cats.has(want) || cats.has(want + tail)) {
+      r.cat = want + tail;
+      ch++;
+    }
+  }
+  return ch;
+}
+
+/* ===== 현장 제외 (월별 품목에서만 숨김, 회사 공용) ===== */
+const EXCL_DOC = 'siteExclude';
+export function useSiteExclude(enabled = true) {
+  const [ids, setIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    return onSnapshot(
+      doc(db, C.ledgerMeta, EXCL_DOC),
+      (d) => setIds((d.data()?.siteIds ?? []) as string[]),
+      () => undefined,
+    );
+  }, [enabled]);
+  return ids;
+}
+export async function saveSiteExclude(siteIds: string[]) {
+  await commitBatch([{ type: 'set', col: C.ledgerMeta, id: EXCL_DOC, data: { siteIds, updatedAt: Date.now() }, merge: false }]);
 }
 
 /* ===== 묶음 ===== */

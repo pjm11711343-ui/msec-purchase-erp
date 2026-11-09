@@ -32,7 +32,7 @@ interface FileState {
 }
 
 function guessSite(sites: Site[], sheetName: string, label: string): string {
-  const cands = [sheetName, label, sheetName.replace(/\(.*\)$/, '')];
+  const cands = [sheetName, label, sheetName.replace(/\s*\(\d+\)\s*$/, ''), sheetName.replace(/\(.*\)$/, '')];
   const trade = /소방/.test(sheetName + label) ? '소방' : /기계/.test(sheetName + label) ? '기계' : undefined;
   const hit = sites.filter((s) =>
     cands.some((c) => c && (looselyEqual(s.name, c) || s.aliases?.some((a) => nameKey(a) === nameKey(c)) || looselyEqual(s.groupName ?? '', c))),

@@ -7,6 +7,7 @@ import { C } from '../lib/firebase';
 import { useSiteCategories, useSites, useStandardCategories } from '../lib/hooks';
 import { nameKey } from '../lib/normalize';
 import {
+  applyKindRules,
   buildRows,
   canonNames,
   cmp,
@@ -21,6 +22,7 @@ import {
   saveItemAlias,
   UNCAT,
   useItemAlias,
+  useSiteExclude,
   type Basis,
   type Cell,
   type LRow,
@@ -30,9 +32,10 @@ import { exportPivotXlsx, exportTablesXlsx } from '../lib/ledgerExcel';
 import { Empty, errMsg, Modal, PageHeader, useToast } from '../components/ui';
 import GipyoCompare from './ledger/GipyoCompare';
 import LedgerImport from './ledger/LedgerImport';
+import SiteManage from './ledger/SiteManage';
 import type { Invoice } from '../types';
 
-type Tab = 'dash' | 'pivot' | 'summary' | 'ledger' | 'gipyo' | 'import';
+type Tab = 'dash' | 'pivot' | 'summary' | 'ledger' | 'gipyo' | 'sites' | 'import';
 type VMode = 'both' | 'qty' | 'amt' | 'price';
 const TABS: [Tab, string][] = [
   ['dash', '대시보드'],
@@ -40,6 +43,7 @@ const TABS: [Tab, string][] = [
   ['summary', '현장·분류·업체 요약'],
   ['ledger', '전체 명세'],
   ['gipyo', '집계표 대조'],
+  ['sites', '현장 관리'],
   ['import', '예전 자료 가져오기'],
 ];
 
@@ -74,6 +78,7 @@ export default function ItemLedger() {
   const cats = useSiteCategories();
   const std = useStandardCategories();
   const alias = useItemAlias();
+  const excluded = useSiteExclude();
   const catalog = useItemCatalog();
   const [catBusy, setCatBusy] = useState(false);
   // 계산서가 목록보다 새로우면 구매청구용 품명 목록을 뒤에서 다시 만든다
@@ -103,6 +108,7 @@ export default function ItemLedger() {
   const [vmode, setVmode] = useState<VMode>(LS.get('vmode', 'both'));
   const [showProc, setShowProc] = useState<boolean>(LS.get('showProc', true));
   const [basis, setBasis] = useState<Basis>(LS.get('basis', 'site'));
+  const [kindRule, setKindRule] = useState<boolean>(LS.get('kindRule', true));
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [fSite, setFSite] = useState('');
@@ -118,7 +124,11 @@ export default function ItemLedger() {
   const [ledgerPage, setLedgerPage] = useState(0);
   const [dsort, setDsort] = useState<Record<string, 'amt' | 'name'>>(LS.get('dsort', {}));
 
-  const all = useMemo(() => buildRows(invoices.data, sites.data, cats.data, std.data, basis, alias), [invoices.data, sites.data, cats.data, std.data, basis, alias]);
+  const all = useMemo(() => {
+    const r = buildRows(invoices.data, sites.data, cats.data, std.data, basis, alias, new Set(excluded));
+    if (kindRule && basis !== 'std') applyKindRules(r, sites.data);
+    return r;
+  }, [invoices.data, sites.data, cats.data, std.data, basis, alias, excluded, kindRule]);
   const canon = useMemo(() => canonNames(all), [all]);
   const allMonths = useMemo(() => [...new Set(all.map((r) => r.m))].sort(), [all]);
   const fromM = from || allMonths[0] || '';
@@ -190,8 +200,14 @@ export default function ItemLedger() {
   const showVen = !pv.gk.includes('vendor');
   const extra = (showSite ? 1 : 0) + (showCat ? 1 : 0) + (showVen ? 1 : 0);
 
-  const exportPivot = () =>
-    exportPivotXlsx(pv, `${condTxt || '전체'} · 묶음 ${GROUPS.find((g) => g[0] === groupBy)?.[1]}`, `월별품목_${fromM}~${toM}.xlsx`, { showSite, showCat, showVen }).catch((e) => toast(errMsg(e), 'err'));
+  const exportPivot = () => {
+    const sites = [...new Set(rows.map((r) => r.site))];
+    const cond = `명신기공 자재부  ·  현장: ${fSite || '전체'}  ·  분류: ${fCat || '전체'}  ·  업체: ${fVendor || '전체'}  ·  기간: ${fromM ? mLong(fromM) : '처음'} ~ ${toM ? mLong(toM) : '마지막'}${q ? `  ·  검색: ${q}` : ''}  ·  출력일 ${new Date().toLocaleDateString('ko-KR')}`;
+    const tag = fSite || (sites.length === 1 ? sites[0] : '전체현장');
+    exportPivotXlsx(rows, canon, groupBy, { site: fSite || undefined, cond, fileName: `월별품목리스트_${tag}_${new Date().toLocaleDateString('sv-SE').replace(/-/g, '')}.xlsx` })
+      .then((n) => toast(`엑셀 저장: 분류 요약 + 전체 + 분류 ${n}개 시트`))
+      .catch((e) => toast(errMsg(e), 'err'));
+  };
 
   return (
     <div>
@@ -209,7 +225,7 @@ export default function ItemLedger() {
       />
 
       <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
-        {TABS.filter(([k]) => isOffice || (k !== 'import' && k !== 'gipyo')).map(([k, label]) => (
+        {TABS.filter(([k]) => isOffice || (k !== 'import' && k !== 'gipyo' && k !== 'sites')).map(([k, label]) => (
           <button key={k} className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium ${tab === k ? 'bg-navy-950 text-white' : 'text-muted hover:bg-canvas hover:text-ink'}`} onClick={() => setTab(k)}>
             {label}
           </button>
@@ -218,6 +234,8 @@ export default function ItemLedger() {
 
       {tab === 'gipyo' ? (
         <GipyoCompare invoices={invoices.data} />
+      ) : tab === 'sites' ? (
+        <SiteManage invoices={invoices.data} sites={sites.data} excluded={excluded} />
       ) : tab === 'import' ? (
         <LedgerImport invoices={invoices.data} />
       ) : (
@@ -270,6 +288,12 @@ export default function ItemLedger() {
               <option value="std">표준분류</option>
               <option value="raw">계산서 원문</option>
             </select>
+            {basis !== 'std' && (
+              <label className="flex items-center gap-1 text-[12px] text-muted" title="짝 현장(○○(기계)/○○(소방))이 있으면 반대쪽 분류 줄을 짝 현장으로 옮기고, (기계) 현장 분류에는 (기계)를 붙입니다">
+                <input type="checkbox" checked={kindRule} onChange={(e) => (setKindRule(e.target.checked), LS.set('kindRule', e.target.checked))} /> 기계/소방 규칙
+              </label>
+            )}
+            {excluded.length > 0 && <span className="chip bg-slate-100 text-[11.5px] text-slate-600" title="현장 관리 탭에서 풀 수 있습니다">제외 현장 {excluded.length}곳</span>}
             {(fSite || fCat || fVendor || q) && (
               <button className="text-[12px] text-muted hover:text-ink" onClick={() => (setFSite(''), setFCat(''), setFVendor(''), setQ(''))}>
                 필터 지우기

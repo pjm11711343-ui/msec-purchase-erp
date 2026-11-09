@@ -276,6 +276,34 @@ function zeroSections(all: Row[], hIdx: number): Set<number> {
   return z;
 }
 
+/** 수량·단가·금액 칸: 숫자만, 또는 '10EA'처럼 숫자+단위만 숫자로 본다 ('삭제', '5월계산서 선처리' 같은 메모는 0) */
+function numCell(v: unknown): number {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (v == null) return 0;
+  const t = String(v).trim();
+  const m = t.match(/^(-?[\d,]+(?:\.\d+)?)\s*(?:원|EA|ea|M|m|개|본|롤|SET|set|Set|식|KG|kg|Kg|L|l|BOX|box|매|조|대|통|켤레|족|R|PCS|pcs)?$/);
+  return m ? num(m[1]) : 0;
+}
+
+/** 업체명 정리: ㈜·(주)·주식회사·괄호 안 내용 빼기 (업체명이 괄호 안에만 있으면 그 글자) */
+export function cleanVendorName(v: string): string {
+  let t = clean(String(v ?? '').replace(/㈜|\(\s*주\s*\)|（\s*주\s*）|주식회사/g, ' '));
+  const inner = t.match(/^[(（\[【]\s*([^)）\]】]+?)\s*[)）\]】]$/);
+  if (inner) return clean(inner[1]);
+  t = clean(t.replace(/[(（\[【][^)）\]】]*[)）\]】]/g, ' '));
+  return t === '0' ? '' : t;
+}
+/** 파일명 괄호 안 업체명 (예: 26.08월계산서정리(에이치디)ver8.0 → 에이치디) */
+function vendorFromFileName(name: string): string {
+  const base = name.replace(/\.[^.]+$/, '');
+  for (const m of base.matchAll(/[(（\[【]\s*([^)）\]】]+?)\s*[)）\]】]/g)) {
+    const x = clean(m[1]);
+    if (!x || /^\d+$/.test(x) || /^ver/i.test(x) || /^(주|사본|최종|수정|완료)/.test(x) || /^\d+(차|월)/.test(x)) continue;
+    return cleanVendorName(x);
+  }
+  return '';
+}
+
 /** 본사(안전) 시트: '총합계 N | 금액 | 현장명' 표로 품목을 현장별로 나눈다 */
 function detectAlloc(wb: XLSX.WorkBook, sn: string, all: Row[], hIdx: number, col: Record<string, number>, r0: number, siteLabel: string): { tbl: { n: number; name: string; r: number; amt: number | null }[]; inv: Record<number, number> } | null {
   const tbl: { n: number; name: string; r: number; amt: number | null }[] = [];
@@ -412,6 +440,18 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
     const m = fileName.match(/(\d{2})\.(\d{2})/);
     if (m) month = `20${m[1]}-${m[2]}`;
   }
+  if (!month) {
+    // 파일명 '8월 계산서정리' → 올해(1·2월인데 지금이 11·12월이면 내년) 8월
+    const m = fileName.match(/(?:^|[^\d])(\d{1,2})\s*월/);
+    if (m && +m[1] >= 1 && +m[1] <= 12) {
+      const now = new Date();
+      let y = now.getFullYear();
+      if (+m[1] - (now.getMonth() + 1) > 6) y--;
+      month = `${y}-${String(+m[1]).padStart(2, '0')}`;
+    }
+  }
+  vendorName = cleanVendorName(vendorName);
+  if (!vendorName) vendorName = vendorFromFileName(fileName);
   if (!month) warnings.push('계산서 월을 찾지 못했습니다. 화면에서 직접 지정하세요.');
   if (!vendorName) warnings.push('갑지에서 업체명을 찾지 못했습니다. 화면에서 직접 지정하세요.');
   const year = month ? Number(month.slice(0, 4)) : undefined;
@@ -468,8 +508,8 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       if (SKIP_RE.test(item.replace(/\s/g, ''))) continue;
       const pv = get(r, 'process');
       if (typeof pv === 'string' && clean(pv) && clean(pv) !== '0') group = clean(pv);
-      const qty = num(get(r, 'qty'));
-      const amount = num(get(r, 'amount'));
+      const qty = numCell(get(r, 'qty'));
+      const amount = numCell(get(r, 'amount'));
       if (!qty && !amount) continue;
       // 계산서 금액이 0원이면(시트 전체 또는 그 묶음) 불러오지 않는다
       if (want === 0 || zsec.has(ri)) {
@@ -482,11 +522,11 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
       const hasChange = chA != null && chA !== '';
       const fa = get(r, 'finalAmount');
       const finalAmount = fa != null && fa !== ''
-        ? num(fa)
+        ? numCell(fa)
         : hasChange
-        ? num(chA)
+        ? numCell(chA)
         : chQ != null && chP != null && chQ !== '' && chP !== ''
-          ? num(chQ) * num(chP)
+          ? numCell(chQ) * numCell(chP)
           : amount;
       const line: InvoiceLine = {
         receivedDate: toDateStr(get(r, 'receivedDate'), year),
@@ -498,11 +538,11 @@ export function parseInvoiceWorkbook(wb: XLSX.WorkBook, fileName: string): Parse
         spec: clean(String(get(r, 'spec') ?? '')).replace(LEAD_SYM, ''),
         unit: clean(String(get(r, 'unit') ?? '')),
         qty,
-        unitPrice: num(get(r, 'unitPrice')),
+        unitPrice: numCell(get(r, 'unitPrice')),
         amount,
-        changedQty: chQ == null || chQ === '' ? undefined : num(chQ),
-        changedPrice: chP == null || chP === '' ? undefined : num(chP),
-        changedAmount: hasChange ? num(chA) : undefined,
+        changedQty: chQ == null || chQ === '' ? undefined : numCell(chQ),
+        changedPrice: chP == null || chP === '' ? undefined : numCell(chP),
+        changedAmount: hasChange ? numCell(chA) : undefined,
         finalAmount,
         // 본사(안전) 시트의 분류는 안전장비류
         categoryText: isSafe ? '안전장비류' : clean(String(get(r, 'categoryText') ?? '').replace(/\n/g, ' ')),
