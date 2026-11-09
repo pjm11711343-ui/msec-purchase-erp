@@ -272,7 +272,9 @@ export default function ReqEdit() {
   const pendEditable = !readOnly && !inTrash && d.status === 'pending' && (d.createdBy === profile?.id || isOffice || d.steps.some((s) => s.userId && s.userId === profile?.id));
   const editable = draftEditable || pendEditable;
   const myTurn = !!d.id && isMyTurn(d as Requisition, profile?.id, can('admin'));
-  const orderEditable = editable ? isOffice : myTurn && isOffice;
+  // 관리자: 대표이사까지 승인이 끝난 뒤에도 거래선·발주 단가는 고칠 수 있다 (발주된 줄은 발주서에서)
+  const adminAfterApproval = !readOnly && !inTrash && d.status === 'approved' && can('admin');
+  const orderEditable = editable ? isOffice : (myTurn && isOffice) || adminAfterApproval;
   const dupDoc =
     d.docNo.trim() && reqs.data.some((r) => r.id !== d.id && r.siteId === d.siteId && nameKey(r.docNo) === nameKey(d.docNo));
 
@@ -755,7 +757,7 @@ export default function ReqEdit() {
     }
     return out;
   };
-  const isLocked = (l: ReqLine) => !!d.id && d.status === 'pending' && !!ordered.get(`${d.id}|${l.key}`);
+  const isLocked = (l: ReqLine) => !!d.id && (d.status === 'pending' || d.status === 'approved') && !!ordered.get(`${d.id}|${l.key}`);
   const pickVendor = (key: string, label: string) => {
     const v = label === NONE ? undefined : vendorOptions.find((x) => vLabel(x) === label);
     setD((x) => {
@@ -1067,6 +1069,30 @@ export default function ReqEdit() {
                   결재 올리기
                 </button>
               </>
+            )}
+            {adminAfterApproval && (
+              <button
+                className="btn-primary"
+                data-req-save=""
+                disabled={busy}
+                title="승인 완료 후 관리자 수정: 거래선·발주 단가만 (발주된 줄은 발주서에서 고치세요)"
+                onClick={() => {
+                  const before = reqs.data.find((r) => r.id === d.id);
+                  const old = new Map((before?.lines ?? []).map((l) => [l.key, l]));
+                  const ch = d.lines.filter((l) => {
+                    const o = old.get(l.key);
+                    return o && ((o.orderPrice || 0) !== (l.orderPrice || 0) || (o.vendorId || '') !== (l.vendorId || ''));
+                  });
+                  if (!ch.length) return toast('바뀐 거래선·단가가 없습니다.');
+                  const txt = ch
+                    .slice(0, 3)
+                    .map((l) => `${l.itemName} ${l.spec}`.trim())
+                    .join(', ');
+                  void save({}, `승인 후 관리자 수정(거래선·단가) ${ch.length}줄: ${txt}${ch.length > 3 ? ' …' : ''}`, `거래선·단가 ${ch.length}줄을 저장했습니다. 승인 상태는 그대로입니다.`);
+                }}
+              >
+                거래선·단가 저장
+              </button>
             )}
             {myTurn && orderEditable && !pendEditable && (
               <button className="btn-ghost" disabled={busy} onClick={() => save({}, '발주 결의 수정', '저장했습니다.')}>
@@ -1726,7 +1752,7 @@ export default function ReqEdit() {
                         {rowEd || l.note ? T(l.key, 'note', l.note, rowEd, 'w-full', { placeholder: bonText(l) ? '(비고)' : '' }) : null}
                       </td>
 <td className={`num ${overOrder(l) ? 'bg-red-50 font-semibold text-red-700' : 'bg-amber-soft/40'}`} title={overOrder(l) ? '발주수량이 금회청구보다 많습니다' : undefined}>
-                        {N(l.key, 'orderQty', l.orderQty || l.reqQty, rowOrderEd, 'w-full', overOrder(l))}
+                        {N(l.key, 'orderQty', l.orderQty || l.reqQty, rowOrderEd && !adminAfterApproval, 'w-full', overOrder(l))}
                       </td>
                       <td className="num bg-amber-soft/40">
                         <div className="flex items-center justify-end gap-0.5">
