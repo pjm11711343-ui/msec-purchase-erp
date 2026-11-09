@@ -14,6 +14,7 @@ import { useVendorRfqs } from '../../lib/rfq';
 import { Empty, errMsg, RateBar, useToast } from '../../components/ui';
 import { useVendorNotices } from '../../lib/notices';
 import VendorNotices, { markNoticeRead, NoticeBanner } from './VendorNotices';
+import PasswordChange from '../../components/PasswordChange';
 import DeliveryPanel from '../../components/DeliveryPanel';
 import { MIN_ROWS, PoSheet, signBoxes } from '../po/PoDetail';
 import type { Invoice, Site } from '../../types';
@@ -30,6 +31,7 @@ export default function VendorPortal() {
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const [siteF, setSiteF] = useState(''); // 현장별 보기 ('' = 전체, 현장별로 묶어서)
   const [page, setPage] = useState<'po' | 'statement' | 'rfq' | 'notice' | 'info'>('po');
+  const [pwOpen, setPwOpen] = useState(false);
   const nt = useVendorNotices(vendor?.vendorId);
   const [noticeOpen, setNoticeOpen] = useState<string | null>(null);
   const unreadNotice = nt.list.filter((n) => !nt.readSet.has(n.id)).length;
@@ -84,9 +86,13 @@ export default function VendorPortal() {
           <div className="text-[16px] font-bold">{vendor?.vendorName}</div>
         </div>
         <div className="ml-auto text-[12px] text-white/60">업체코드 {vendor?.code}</div>
+        <button className="text-[12px] text-white/70 hover:text-white hover:underline" onClick={() => setPwOpen(true)}>
+          접속코드 변경
+        </button>
         <button className="text-[12px] text-amber-brand hover:underline" onClick={logout}>
           로그아웃
         </button>
+        {pwOpen && <PasswordChange label="접속코드" onClose={() => setPwOpen(false)} />}
       </header>
       <div className="mx-auto max-w-[1280px] p-2.5 sm:p-5">
         <div className="no-print mb-4 grid grid-cols-2 gap-1 sm:flex">

@@ -43,7 +43,13 @@ body {
 }
 
 .input {
-  @apply h-8 rounded-md border border-line bg-white px-2.5 text-[13px] outline-none transition focus:border-amber-brand focus:ring-2 focus:ring-amber-brand/25;
+  @apply h-8 rounded-md border border-line bg-white px-2.5 text-[13px] text-ink outline-none transition focus:border-amber-brand focus:ring-2 focus:ring-amber-brand/25;
+  /* 기기가 어두운 모드여도 입력 글씨가 흰색으로 안 보이지 않게 */
+  color-scheme: light;
+  -webkit-text-fill-color: currentColor;
+}
+.input::placeholder {
+  -webkit-text-fill-color: #9aa3b2;
 }
 .btn {
   @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;

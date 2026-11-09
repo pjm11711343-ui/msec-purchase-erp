@@ -6,6 +6,7 @@ import { EXEC_MENUS, execMenuOf, MENU_ROLES, roleMenusOf, type Settings } from '
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL, type Role } from '../types';
 import { usePurchaseOrders } from '../lib/pos';
+import PasswordChange from './PasswordChange';
 import { usePoPriceSync } from '../lib/poPrices';
 
 /** 업체가 기입한 빈 단가를 발주서에 옮겨 적는다 (자재부·관리자 화면이 열려 있을 때) */
@@ -96,6 +97,7 @@ export default function Layout() {
   const curMenu = execMenuOf(loc.pathname);
   const blocked = isExec && execMenus !== undefined && !!curMenu && !execAllowed(curMenu.to);
   const firstAllowed = EXEC_MENUS.find((m) => execAllowed(m.to))?.to;
+  const [pwOpen, setPwOpen] = useState(false);
   const [mini, setMini] = useState(() => {
     try {
       return localStorage.getItem('erp.navMini') === '1';
@@ -190,9 +192,15 @@ export default function Layout() {
         <div className={`border-t border-white/10 px-4 py-3 ${mini ? 'lg:px-1 lg:text-center' : ''}`}>
           <div className={`text-[13px] font-semibold text-white ${mini ? 'lg:truncate lg:text-[11px]' : ''}`}>{profile?.name}</div>
           <div className={`text-[11.5px] text-white/50 ${mini ? 'lg:hidden' : ''}`}>{role ? ROLE_LABEL[role] : ''}</div>
-          <button className="mt-2 text-[12px] text-amber-brand hover:underline" onClick={logout}>
-            로그아웃
-          </button>
+          <div className={`mt-2 flex gap-3 ${mini ? 'lg:flex-col lg:gap-1' : ''}`}>
+            <button className="text-[12px] text-white/70 hover:text-white hover:underline" onClick={() => setPwOpen(true)}>
+              비밀번호 변경
+            </button>
+            <button className="text-[12px] text-amber-brand hover:underline" onClick={logout}>
+              로그아웃
+            </button>
+          </div>
+          {pwOpen && <PasswordChange onClose={() => setPwOpen(false)} />}
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto">
