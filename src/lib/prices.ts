@@ -1,7 +1,7 @@
 // 단가관리시스템 단가 읽기 + 품명·규격으로 찾기
 import { useEffect, useState } from 'react';
 import { collection, collectionGroup, getDocs, limit, query, type DocumentData } from 'firebase/firestore';
-import { C, db, PRICE_COLLECTION, PRICE_VENDOR_COLLECTION } from './firebase';
+import { auth, C, db, PRICE_COLLECTION, PRICE_VENDOR_COLLECTION } from './firebase';
 import { commitBatch } from './db';
 import { useAuth } from '../auth/AuthContext';
 import { nameKey, num, specKey } from './normalize';
@@ -17,6 +17,8 @@ export interface PriceRow {
   buyPrice: number; // 구매단가
   maker?: string;
   category?: string; // 단가관리시스템의 분류 (있으면)
+  bizNo?: string; // 업체 사업자번호 (단가 관리시스템 업체 아이디)
+  effectiveFrom?: string; // 적용일
 }
 
 const pick = (d: DocumentData, ...keys: string[]) => {
@@ -66,9 +68,33 @@ async function loadFromSource(): Promise<PriceRow[]> {
     .filter((r) => r.itemName && r.buyPrice > 0);
 }
 
-/** 사본 다시 만들기 (자재부·관리자) */
+/** 새 단가 관리시스템(msec-price-manager)에서 서버(/api/price-sync)를 거쳐 가져오기 */
+async function loadFromPriceManager(): Promise<PriceRow[]> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('로그인이 필요합니다.');
+  const r = await fetch('/api/price-sync', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: (string | number)[][] };
+  if (!r.ok || !j.ok) throw new Error(j.error || `단가 관리시스템에서 가져오지 못했습니다 (${r.status})`);
+  return (j.rows ?? []).map(([vid, vname, biz, item, spec, unit, cost, nego, buy, maker, cat, eff]) => ({
+    priceVendorId: String(vid),
+    vendorName: String(vname),
+    itemName: String(item),
+    spec: String(spec),
+    unit: String(unit),
+    listPrice: Number(cost) || 0,
+    negoRate: Number(nego) || 0,
+    buyPrice: Number(buy) || 0,
+    ...(maker ? { maker: String(maker) } : {}),
+    ...(cat ? { category: String(cat) } : {}),
+    ...(biz ? { bizNo: String(biz) } : {}),
+    ...(eff ? { effectiveFrom: String(eff).slice(0, 10) } : {}),
+  }));
+}
+void loadFromSource; // 예전 단가관리 데이터 (연동 전) — 더는 쓰지 않음
+
+/** 사본 다시 만들기 (자재부·관리자, '지금 가져오기' 버튼) */
 export async function rebuildPriceCache(): Promise<PriceRow[]> {
-  const rows = await loadFromSource();
+  const rows = await loadFromPriceManager();
   const at = Date.now();
   const parts = Math.max(1, Math.ceil(rows.length / PART));
   const old = await getDocs(collection(db, C.priceCache));
@@ -97,17 +123,9 @@ export function loadPrices(opts: { force?: boolean; canRebuild?: boolean } = {})
     const rows = parts.flatMap((d) => (d.data().rows ?? []) as PriceRow[]);
     const at = Math.max(0, ...parts.map((d) => d.data().at ?? 0));
     cacheAt = at;
-    if (opts.canRebuild && (!rows.length || Date.now() - at > MAX_AGE)) {
-      try {
-        cacheAt = Date.now();
-        return await rebuildPriceCache();
-      } catch {
-        if (rows.length) return rows;
-        throw new Error('단가표를 읽지 못했습니다.');
-      }
-    }
-    // 사본이 아직 없으면 (현장 사용자) 어쩔 수 없이 원본에서
-    return rows.length ? rows : loadFromSource();
+    // 자동으로 다시 가져오지 않는다 (자재부가 '단가 관리시스템에서 가져오기' 버튼을 누를 때만)
+    void MAX_AGE;
+    return rows;
   })().catch((e) => {
     cache = null;
     throw e;
@@ -151,4 +169,12 @@ export function sameVendor(priceVendorName: string, erpVendorName: string, alias
     const [s, l] = a.length <= b.length ? [a, b] : [b, a];
     return s.length >= 3 && l.includes(s);
   });
+}
+
+/** 단가 관리시스템 업체 ↔ ERP 업체: 사업자번호가 같으면 확실히 같은 업체, 아니면 이름으로 */
+export function priceVendorIs(p: Pick<PriceRow, 'vendorName' | 'bizNo'>, v: { name: string; aliases?: string[]; bizNo?: string }) {
+  const a = (p.bizNo ?? '').replace(/\D/g, '');
+  const b = (v.bizNo ?? '').replace(/\D/g, '');
+  if (a.length === 10 && b.length === 10) return a === b;
+  return sameVendor(p.vendorName, v.name, v.aliases ?? []);
 }

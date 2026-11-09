@@ -40,13 +40,13 @@ export default function Prices() {
   }, []);
 
   const refresh = async () => {
-    if (!confirm('단가관리시스템 원본에서 단가표를 다시 불러올까요? (단가 수만큼 Firebase 읽기를 씁니다)')) return;
+    if (!confirm('단가 관리시스템(msec-price-manager)에서 지금 단가를 가져올까요? ERP 청구서 단가 자동 채우기와 단가 조회가 새 단가로 바뀝니다.')) return;
     setBusy(true);
     try {
       const r = await loadPrices({ force: true, canRebuild: true });
       setRows(r);
       setAt(priceCacheAt());
-      toast(`단가 ${r.length.toLocaleString()}건을 새로 불러왔습니다.`);
+      toast(`단가 관리시스템에서 ${new Set(r.map((x) => x.priceVendorId)).size}개 업체 · 단가 ${r.length.toLocaleString()}건을 가져왔습니다.`);
     } catch (e) {
       toast(errMsg(e), 'err');
     } finally {
@@ -149,15 +149,18 @@ export default function Prices() {
     <div>
       <PageHeader
         title="단가관리 단가 조회"
-        desc={`단가관리시스템 단가표의 ERP 사본입니다${at ? ` (${new Date(at).toLocaleString('ko-KR')} 기준, 하루 한 번 자동 갱신)` : ''}. 단가 수정은 단가관리시스템에서 하세요. 분류는 품목·단가에서 정한 자재분류를 씁니다.`}
+        desc={`단가 관리시스템(msec-price-manager) 단가를 ERP로 가져온 사본입니다${at ? ` (${new Date(at).toLocaleString('ko-KR')}에 가져옴)` : ' — 아직 가져오지 않았습니다'}. 단가가 바뀌면 [단가 관리시스템에서 가져오기]를 누르세요. 단가 수정은 단가 관리시스템에서 합니다.`}
         actions={
           <div className="flex flex-wrap gap-2">
             <input className="input w-56" placeholder="업체·품명·규격·메이커 검색" value={q} onChange={(e) => setQ(e.target.value)} />
             <button className="btn-ghost" onClick={exportExcel} disabled={!filtered.length}>
               엑셀 내려받기
             </button>
-            <button className="btn-ghost" disabled={busy} onClick={refresh}>
-              {busy ? '불러오는 중…' : '원본에서 새로 불러오기'}
+            <a className="btn-ghost" href="https://msec-price-manager.vercel.app/" target="_blank" rel="noreferrer">
+              단가 관리시스템 열기 ↗
+            </a>
+            <button className="btn-primary" disabled={busy} onClick={refresh}>
+              {busy ? '가져오는 중…' : '단가 관리시스템에서 가져오기'}
             </button>
           </div>
         }

@@ -7,7 +7,7 @@ import { useSiteCategories, useSites, useStandardCategories, useVendors } from '
 import { fillReqForm, usePurposeOf } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
-import { findPrices, priceKey, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
+import { findPrices, priceKey, priceVendorIs, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
 import { bonText, lastOrderPrice, lineAmount, restoreReq, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
 import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
@@ -328,10 +328,10 @@ export default function ReqEdit() {
     if (ep) return { orderPrice: ep.price, priceSource: 'ERP단가', unit: l.unit || ep.unit, ...(!l.vendorId ? { vendorId: ep.vendorId, vendorName: ep.vendorName } : {}) };
     const cands = findPrices(prices.rows, l.itemName, l.spec);
     const v = vendors.data.find((x) => x.id === l.vendorId);
-    const forVendor = v ? cands.find((p) => sameVendor(p.vendorName, v.name, v.aliases)) : undefined;
+    const forVendor = v ? cands.find((p) => priceVendorIs(p, v)) : undefined;
     const pick: PriceRow | undefined = forVendor ?? cands[0];
     if (pick) {
-      const erpV = v ?? vendors.data.find((x) => sameVendor(pick.vendorName, x.name, x.aliases));
+      const erpV = v ?? vendors.data.find((x) => priceVendorIs(pick, x));
       return { orderPrice: pick.buyPrice, priceSource: '단가표', unit: l.unit || pick.unit, ...(erpV && !l.vendorId ? { vendorId: erpV.id, vendorName: erpV.name } : {}) };
     }
     const last = lastOrderPrice(reqs.data, l.itemName, l.spec);
@@ -2095,7 +2095,7 @@ export default function ReqEdit() {
                     </thead>
                     <tbody>
                       {cands.map((p, i) => {
-                        const v = vendors.data.find((x) => sameVendor(p.vendorName, x.name, x.aliases));
+                        const v = vendors.data.find((x) => priceVendorIs(p, x));
                         return (
                           <tr key={i}>
                             <td>
