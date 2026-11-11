@@ -57,7 +57,12 @@ export default function LedgerImport({ invoices }: { invoices: Invoice[] }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
 
-  const rows = useMemo(() => (data?.d.rows ?? []).filter((r) => !r.z && r.item), [data]);
+  const [mFrom, setMFrom] = useState('');
+  const [mTo, setMTo] = useState('');
+  const allRows = useMemo(() => (data?.d.rows ?? []).filter((r) => !r.z && r.item), [data]);
+  const allMonths = useMemo(() => [...new Set(allRows.map((r) => r.m))].sort(), [allRows]);
+  const rows = useMemo(() => allRows.filter((r) => (!mFrom || r.m >= mFrom) && (!mTo || r.m <= mTo)), [allRows, mFrom, mTo]);
+  const fileName = useMemo(() => new Map((data?.d.files ?? []).map((f) => [f.id, f.name])), [data]);
   const stat = (k: 'site' | 'vendor') => {
     const m = new Map<string, { n: number; a: number }>();
     for (const r of rows) {
@@ -86,6 +91,8 @@ export default function LedgerImport({ invoices }: { invoices: Invoice[] }) {
       setSiteMap(sm);
       setVendorMap(vm);
       setData({ name: file.name, d });
+      setMFrom('');
+      setMTo('');
     } catch (e) {
       toast(errMsg(e), 'err');
     }
@@ -175,7 +182,7 @@ export default function LedgerImport({ invoices }: { invoices: Invoice[] }) {
           siteId: g.siteId,
           sheetName: '예전 프로그램',
           source: 'import',
-          fileName: data.name,
+          fileName: [...new Set(g.rows.map((r) => fileName.get(r.fid) ?? ''))].filter(Boolean).join(', ').slice(0, 300) || data.name,
           totalAmount: lines.reduce((a, l) => a + l.finalAmount, 0),
           lineCount: lines.length,
           appliedToLedger: false, // 기록용 (투입집계에는 더하지 않음)
@@ -234,6 +241,26 @@ export default function LedgerImport({ invoices }: { invoices: Invoice[] }) {
         <span className="text-muted">
           {months.length}개월 ({mLong(months[0])} ~ {mLong(months[months.length - 1])}) · 파일 {data.d.files.length}개 · {rows.length.toLocaleString()}줄 · {fmtA(total)}원
         </span>
+        <label className="flex items-center gap-1 text-[12px]">
+          옮길 달
+          <select className="input h-7" value={mFrom} onChange={(e) => setMFrom(e.target.value)}>
+            <option value="">처음</option>
+            {allMonths.map((m) => (
+              <option key={m} value={m}>
+                {mLong(m)}
+              </option>
+            ))}
+          </select>
+          ~
+          <select className="input h-7" value={mTo} onChange={(e) => setMTo(e.target.value)}>
+            <option value="">마지막</option>
+            {allMonths.map((m) => (
+              <option key={m} value={m}>
+                {mLong(m)}
+              </option>
+            ))}
+          </select>
+        </label>
         <span className="flex-1" />
         {data.d.alias && Object.keys(data.d.alias).length > 0 && (
           <label className="flex items-center gap-1 text-[12px]">

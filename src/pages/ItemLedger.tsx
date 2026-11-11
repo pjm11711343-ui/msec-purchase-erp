@@ -32,10 +32,10 @@ import { exportPivotXlsx, exportTablesXlsx } from '../lib/ledgerExcel';
 import { Empty, errMsg, Modal, PageHeader, useToast } from '../components/ui';
 import GipyoCompare from './ledger/GipyoCompare';
 import LedgerImport from './ledger/LedgerImport';
-import SiteManage from './ledger/SiteManage';
+import UploadManage from './ledger/UploadManage';
 import type { Invoice } from '../types';
 
-type Tab = 'dash' | 'pivot' | 'summary' | 'ledger' | 'gipyo' | 'sites' | 'import';
+type Tab = 'dash' | 'pivot' | 'summary' | 'ledger' | 'gipyo' | 'files' | 'import';
 type VMode = 'both' | 'qty' | 'amt' | 'price';
 const TABS: [Tab, string][] = [
   ['dash', '대시보드'],
@@ -43,7 +43,7 @@ const TABS: [Tab, string][] = [
   ['summary', '현장·분류·업체 요약'],
   ['ledger', '전체 명세'],
   ['gipyo', '집계표 대조'],
-  ['sites', '현장 관리'],
+  ['files', '업로드 관리'],
   ['import', '예전 자료 가져오기'],
 ];
 
@@ -102,7 +102,7 @@ export default function ItemLedger() {
     }
   };
 
-  const [tab, setTabState] = useState<Tab>(LS.get('tab', 'dash'));
+  const [tab, setTabState] = useState<Tab>(() => { const t = LS.get<string>('tab', 'dash'); return (t === 'sites' ? 'files' : TABS.some(([k]) => k === t) ? t : 'dash') as Tab; });
   const setTab = (t: Tab) => (setTabState(t), LS.set('tab', t));
   const [groupBy, setGroupBy] = useState<string>(LS.get('groupBy', 'site>cat'));
   const [vmode, setVmode] = useState<VMode>(LS.get('vmode', 'both'));
@@ -251,7 +251,7 @@ export default function ItemLedger() {
       />
 
       <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
-        {TABS.filter(([k]) => isOffice || (k !== 'import' && k !== 'gipyo' && k !== 'sites')).map(([k, label]) => (
+        {TABS.filter(([k]) => isOffice || (k !== 'import' && k !== 'gipyo' && k !== 'files')).map(([k, label]) => (
           <button key={k} className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium ${tab === k ? 'bg-navy-950 text-white' : 'text-muted hover:bg-canvas hover:text-ink'}`} onClick={() => setTab(k)}>
             {label}
           </button>
@@ -260,8 +260,8 @@ export default function ItemLedger() {
 
       {tab === 'gipyo' ? (
         <GipyoCompare invoices={invoices.data} />
-      ) : tab === 'sites' ? (
-        <SiteManage invoices={invoices.data} sites={sites.data} excluded={excluded} />
+      ) : tab === 'files' ? (
+        <UploadManage invoices={invoices.data} sites={sites.data} excluded={excluded} />
       ) : tab === 'import' ? (
         <LedgerImport invoices={invoices.data} />
       ) : (
@@ -335,7 +335,7 @@ export default function ItemLedger() {
                 <input type="checkbox" checked={kindRule} onChange={(e) => (setKindRule(e.target.checked), LS.set('kindRule', e.target.checked))} /> 기계/소방 규칙
               </label>
             )}
-            {excluded.length > 0 && <span className="chip bg-slate-100 text-[11.5px] text-slate-600" title="현장 관리 탭에서 풀 수 있습니다">제외 현장 {excluded.length}곳</span>}
+            {excluded.length > 0 && <span className="chip bg-slate-100 text-[11.5px] text-slate-600" title="업로드 관리 탭에서 풀 수 있습니다">제외 현장 {excluded.length}곳</span>}
             {(fSite || fCat || fVendor || q) && (
               <button className="text-[12px] text-muted hover:text-ink" onClick={() => (setFSite(''), setFCat(''), setFVendor(''), setQ(''))}>
                 필터 지우기
