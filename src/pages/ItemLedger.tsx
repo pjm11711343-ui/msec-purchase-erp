@@ -131,8 +131,34 @@ export default function ItemLedger() {
   }, [invoices.data, sites.data, cats.data, std.data, basis, alias, excluded, kindRule]);
   const canon = useMemo(() => canonNames(all), [all]);
   const allMonths = useMemo(() => [...new Set(all.map((r) => r.m))].sort(), [all]);
-  const fromM = from || allMonths[0] || '';
-  const toM = to || allMonths[allMonths.length - 1] || '';
+  /** 기간 고르기 목록: 자료 있는 첫 달(또는 작년 1월) ~ 이번 달(자료가 더 뒤면 그 달)까지 빠짐없이 */
+  const nowM = new Date().toLocaleDateString('sv-SE').slice(0, 7);
+  const pickMonths = useMemo(() => {
+    const first = [allMonths[0], `${+nowM.slice(0, 4) - 1}-01`].filter(Boolean).sort()[0];
+    const last = [allMonths[allMonths.length - 1] ?? '', nowM].sort()[1];
+    const out: string[] = [];
+    for (let y = +first.slice(0, 4), m = +first.slice(5, 7); `${y}-${String(m).padStart(2, '0')}` <= last; m === 12 ? (y++, (m = 1)) : m++) out.push(`${y}-${String(m).padStart(2, '0')}`);
+    return out.reverse(); // 최근 달이 위
+  }, [allMonths, nowM]);
+  const hasData = useMemo(() => new Set(allMonths), [allMonths]);
+  const fromM0 = from || allMonths[0] || '';
+  const toM0 = to || allMonths[allMonths.length - 1] || '';
+  const [fromM, toM] = fromM0 > toM0 ? [toM0, fromM0] : [fromM0, toM0];
+  const addM = (ym: string, n: number) => {
+    const d = new Date(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const PRESETS: [string, () => [string, string]][] = [
+    ['이번 달', () => [nowM, nowM]],
+    ['지난달', () => [addM(nowM, -1), addM(nowM, -1)]],
+    ['최근 3개월', () => [addM(nowM, -2), nowM]],
+    ['최근 6개월', () => [addM(nowM, -5), nowM]],
+    ['최근 12개월', () => [addM(nowM, -11), nowM]],
+    ['올해', () => [`${nowM.slice(0, 4)}-01`, nowM]],
+    ['작년', () => [`${+nowM.slice(0, 4) - 1}-01`, `${+nowM.slice(0, 4) - 1}-12`]],
+    ['전체', () => ['', '']],
+  ];
+  const setRange = (f: string, t: string) => (setFrom(f), setTo(t));
 
   /** 기간·검색만 적용 (왼쪽 나무용) */
   const base = useMemo(() => {
@@ -243,19 +269,35 @@ export default function ItemLedger() {
           {/* 공통 필터 */}
           <div className="card mb-3 flex flex-wrap items-center gap-2 px-4 py-2.5">
             <span className="text-muted">기간</span>
-            <select className="input h-7" value={fromM} onChange={(e) => setFrom(e.target.value)}>
-              {allMonths.map((m) => (
+<select className="input h-7" value={fromM} onChange={(e) => setFrom(e.target.value)}>
+              {pickMonths.map((m) => (
                 <option key={m} value={m}>
                   {mLong(m)}
+                  {hasData.has(m) ? '' : ' (자료 없음)'}
                 </option>
               ))}
             </select>
             <span className="text-muted">~</span>
             <select className="input h-7" value={toM} onChange={(e) => setTo(e.target.value)}>
-              {allMonths.map((m) => (
+              {pickMonths.map((m) => (
                 <option key={m} value={m}>
                   {mLong(m)}
+                  {hasData.has(m) ? '' : ' (자료 없음)'}
                 </option>
+              ))}
+            </select>
+            <select
+              className="input h-7 w-28"
+              value=""
+              onChange={(e) => {
+                const p = PRESETS.find(([k]) => k === e.target.value);
+                if (p) setRange(...p[1]());
+              }}
+              title="자주 쓰는 기간 바로 고르기"
+            >
+              <option value="">빠른 기간…</option>
+              {PRESETS.map(([k]) => (
+                <option key={k}>{k}</option>
               ))}
             </select>
             <select className="input h-7 w-40" value={fSite} onChange={(e) => (setFSite(e.target.value), setFCat(''))}>
