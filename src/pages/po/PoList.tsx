@@ -63,6 +63,7 @@ export default function PoList() {
     }
   };
   const [vendorPick, setVendorPick] = useState<Record<string, string>>({}); // 거래선 미지정 줄 → 업체
+  const [remarkPick, setRemarkPick] = useState<Record<string, string>>({}); // 발주서 비고 (처음엔 청구서 비고)
   const [siteF, setSiteF] = useState('');
   const [statusF, setStatusF] = useState<'' | PoStatus>('');
   const [q, setQ] = useState('');
@@ -87,6 +88,7 @@ export default function PoList() {
   const pend = useMemo(() => pendingLines(reqs.data, pos.data, isOffice && withPre), [reqs.data, pos.data, isOffice, withPre]);
   const preCount = useMemo(() => (isOffice ? pendingLines(reqs.data, pos.data, true).filter((p) => p.pre).length : 0), [reqs.data, pos.data, isOffice]);
   const vendorOf = (p: PendingLine) => vendorPick[p.key] ?? p.line.vendorId ?? '';
+  const remarkOf = (p: PendingLine) => remarkPick[p.key] ?? p.line.remark ?? '';
 
   // 현장 → 업체 → 줄
   const groups = useMemo(() => {
@@ -129,8 +131,10 @@ export default function PoList() {
         const v = vendors.data.find((x) => x.id === vendorId);
         const poNo = nextPoNo(pos.data, site?.code ?? 'PO', date, taken);
         taken.add(poNo);
-        const lines: PoLine[] = list.map(({ req, line }) => {
+        const lines: PoLine[] = list.map((pl) => {
+          const { req, line } = pl;
           const qty = line.orderQty || line.reqQty;
+          const remark = remarkOf(pl).trim();
           return {
             reqId: req.id,
             reqDocNo: req.docNo,
@@ -141,7 +145,7 @@ export default function PoList() {
             qty,
             price: line.orderPrice || 0,
             amount: Math.round(qty * (line.orderPrice || 0)),
-            remark: line.remark,
+            ...(remark ? { remark } : {}),
             dueDate: line.dueDate,
             location: line.location,
             siteCategoryId: line.siteCategoryId,
@@ -178,6 +182,7 @@ export default function PoList() {
       await commitBatch(ops);
       await audit('발주서 생성', made.join(', '));
       toast(`발주서 ${made.length}건을 만들었습니다.`);
+      setRemarkPick((m) => Object.fromEntries(Object.entries(m).filter(([k]) => !chosen.some((p) => p.key === k))));
       clear();
       setTab('list');
     } catch (e) {
@@ -412,7 +417,7 @@ export default function PoList() {
                               <th className="num">발주수량</th>
                               <th className="num">단가</th>
                               <th className="num">금액</th>
-                              <th>비고</th>
+                              <th className="min-w-[200px]">비고 (발주서에 인쇄)</th>
                               <th>거래선</th>
                             </tr>
                           </thead>
@@ -440,7 +445,16 @@ export default function PoList() {
                                   <td className="num">{qty.toLocaleString()}</td>
                                   <td className={`num ${p.line.orderPrice ? '' : 'text-amber-700'}`}>{p.line.orderPrice ? won(p.line.orderPrice) : '단가 없음'}</td>
                                   <td className="num">{won(qty * (p.line.orderPrice || 0))}</td>
-                                  <td className="text-muted">{[p.line.location, p.line.remark].filter(Boolean).join(' · ')}</td>
+                                  <td>
+                                    <input
+                                      className={`input h-7 w-full min-w-[180px] px-1.5 text-[12px] ${remarkPick[p.key] !== undefined && remarkPick[p.key] !== (p.line.remark ?? '') ? 'border-amber-brand bg-amber-soft' : ''}`}
+                                      placeholder="발주 내용 (예: 오전 하차, 지게차 필요)"
+                                      value={remarkOf(p)}
+                                      onChange={(e) => setRemarkPick((m) => ({ ...m, [p.key]: e.target.value }))}
+                                      title={p.line.remark ? `청구서 비고: ${p.line.remark}` : '청구서 비고 없음'}
+                                    />
+                                    {p.line.location && <div className="mt-0.5 text-[11px] text-muted">위치: {p.line.location}</div>}
+                                  </td>
                                   <td>
                                     <select
                                       className={`input h-7 w-36 ${vendorOf(p) ? '' : 'border-amber-brand bg-amber-soft'}`}
