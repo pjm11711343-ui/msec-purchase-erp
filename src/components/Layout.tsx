@@ -11,6 +11,9 @@ import { ROLE_LABEL, type Role } from '../types';
 import { usePurchaseOrders } from '../lib/pos';
 import PasswordChange from './PasswordChange';
 import { usePoPriceSync } from '../lib/poPrices';
+import { useRequisitions } from '../lib/reqs';
+import { pendingLines } from '../lib/pos';
+import { isMyTurn } from '../pages/req/ReqList';
 
 /** 업체가 기입한 빈 단가를 발주서에 옮겨 적는다 (자재부·관리자 화면이 열려 있을 때) */
 function PoPriceSync() {
@@ -82,6 +85,17 @@ function OfficeSync({ admin, onPending }: { admin: boolean; onPending: (n: numbe
   return null;
 }
 
+/** 메뉴 배지: 구매청구 = 내 결재 차례, 발주 = 발주 대기 줄 (자재부·관리자) */
+function MenuBadges({ office, onChange }: { office: boolean; onChange: (b: Record<string, number>) => void }) {
+  const { profile, can } = useAuth();
+  const reqs = useRequisitions();
+  const pos = usePurchaseOrders();
+  const mine = reqs.data.filter((r) => isMyTurn(r, profile?.id, can('admin'))).length;
+  const wait = office ? pendingLines(reqs.data, pos.data).length : 0;
+  useEffect(() => onChange({ '/req': mine, '/po': wait }), [mine, wait, onChange]);
+  return null;
+}
+
 export default function Layout() {
   const { profile, logout } = useAuth();
   const role = profile?.role;
@@ -110,6 +124,7 @@ export default function Layout() {
   const firstAllowed = EXEC_MENUS.find((m) => execAllowed(m.to))?.to;
   const [pwOpen, setPwOpen] = useState(false);
   const [reqCount, setReqCount] = useState(0);
+  const [badges, setBadges] = useState<Record<string, number>>({});
   const [mini, setMini] = useState(() => {
     try {
       return localStorage.getItem('erp.navMini') === '1';
@@ -131,6 +146,7 @@ export default function Layout() {
   const curLabel = GROUPS.flatMap((g) => g.items).find((i) => (i.to === '/' ? loc.pathname === '/' : loc.pathname.startsWith(i.to)))?.label ?? '';
   return (
     <div className="flex h-full flex-col lg:flex-row">
+      {role && <MenuBadges office={role === 'admin' || role === 'material'} onChange={setBadges} />}
       {(role === 'admin' || role === 'material') && <OfficeSync admin={role === 'admin'} onPending={setReqCount} />}
       {/* 폰·태블릿 위쪽 막대 */}
       <header className="no-print sticky top-0 z-30 flex items-center gap-2 bg-navy-950 px-3 py-2 text-white lg:hidden">
@@ -194,6 +210,11 @@ export default function Layout() {
                       }
                     >
                       <span className={mini ? 'lg:hidden' : ''}>{i.label}</span>
+                      {(badges[i.to] ?? 0) > 0 && (
+                        <span className={`ml-1.5 rounded-full px-1.5 text-[10.5px] font-bold ${i.to === '/req' ? 'bg-red-500 text-white' : 'bg-amber-brand text-navy-950'}`} title={i.to === '/req' ? '내 결재 차례' : '발주 대기 줄'}>
+                          {badges[i.to]}
+                        </span>
+                      )}
                       {i.to === '/master/users' && reqCount > 0 && <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[10.5px] font-bold text-white" title="계정 신청 대기">{reqCount}</span>}
                       {mini && <span className="hidden lg:inline">{i.label.replace(/\s/g, '').slice(0, 2)}</span>}
                     </NavLink>

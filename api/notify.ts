@@ -8,6 +8,7 @@
 //  delivery_plan 업체 납품 일정 → 현장 단톡방 + 자재부 텔레그램              (업체·자재부)
 //  approval_opinion 결재자 의견·지시 → 청구서 작성자 + 현장 단톡방                (사내)
 //  account_request 초기화면 계정 신청 → 자재부 텔레그램                       (신청자 본인)
+//  req_approved  구매청구 최종 승인 → 자재부 텔레그램 (발주 대기)            (사내)
 //  rfq_sent      견적 의뢰 → 업체 메일(의뢰서 PDF·포털 링크)                 (자재부·관리자)
 import { esc, fail, getDoc, HttpError, sendMail, sendTelegram, verifyUser, type Res } from './_lib/common.js';
 
@@ -165,6 +166,18 @@ export default async function handler(req: Req, res: Res) {
       const tAuthor = await sendTelegram(author?.telegramChatId, msg);
       const tSite = s?.telegramChatId && s.telegramChatId !== author?.telegramChatId ? await sendTelegram(s.telegramChatId, msg) : 'skipped';
       return res.status(200).json({ ok: true, telegram: tAuthor, site: tSite });
+    }
+
+    if (event === 'req_approved') {
+      if (!staff) throw new HttpError(403, '사내 사용자만 보낼 수 있습니다.');
+      const id = String(body.reqId ?? '');
+      const r = id && (await getDoc<{ siteName: string; docNo?: string; requestDate: string; createdByName?: string; processName?: string; purpose?: string; totalAmount?: number; status: string; lines?: { itemName: string; spec?: string; unit?: string; reqQty?: number; orderQty?: number }[] }>(me.token, `erp_requisitions/${id}`));
+      if (!r) throw new HttpError(404, '청구서를 찾을 수 없습니다.');
+      if (r.status !== 'approved') return res.status(200).json({ ok: true, telegram: 'skipped' });
+      const ls = (r.lines ?? []).filter((l) => l.itemName);
+      const msg = `✅ <b>구매청구 최종 승인 · 발주 대기</b>\n${esc(r.siteName)} ${esc(r.docNo || r.requestDate)}\n${[r.processName, r.purpose].filter(Boolean).map((x) => esc(String(x))).join(' - ')}\n작성 ${esc(r.createdByName ?? '')} · ${ls.length}품목${r.totalAmount ? ` · ${won(r.totalAmount)}원` : ''}\n${ls.slice(0, 6).map((l) => `· ${esc(l.itemName)} ${esc(l.spec ?? '')} ${won(l.orderQty || l.reqQty || 0)}${esc(l.unit ?? '')}`).join('\n')}${ls.length > 6 ? `\n· 외 ${ls.length - 6}건` : ''}\n\n발주: ${origin}/po`;
+      const sent = await sendTelegram(process.env.TELEGRAM_OFFICE_CHAT_ID, msg);
+      return res.status(200).json({ ok: true, telegram: sent });
     }
 
     if (event === 'approval_turn') {

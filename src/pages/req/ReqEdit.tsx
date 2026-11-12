@@ -517,7 +517,7 @@ export default function ReqEdit() {
     if (first < 0) {
       if (!steps.some((s) => s.result === 'approved')) return toast('결재선에 결재자를 한 명 이상 지정하세요.', 'err');
       // 본사 결재자가 없으면 현장 승인으로 바로 최종 승인
-      return void save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approverIds, submittedAt: now, approvedAt: now }, '결재 요청 (현장 승인 완료)', '현장 결재가 끝나 최종 승인되었습니다.');
+      return void save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approverIds, submittedAt: now, approvedAt: now }, '결재 요청 (현장 승인 완료)', '현장 결재가 끝나 최종 승인되었습니다.').then((rid) => rid && notifyQuiet('req_approved', { reqId: rid }));
     }
     // 결재 차례가 된 결재자에게 텔레그램 (개인 Chat ID가 있으면)
     void save(
@@ -551,7 +551,10 @@ export default function ReqEdit() {
     if (result === 'rejected') return void save({ status: 'rejected', steps, currentApproverId: undefined, opinions }, '반려', '반려했습니다.').then(tellOpinion);
     const next = ceo ? -1 : nextActive(steps, j + 1);
     if (next < 0)
-      return void save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now, opinions }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.').then(tellOpinion);
+      return void save({ status: 'approved', steps, currentStep: steps.length - 1, currentApproverId: undefined, approvedAt: now, opinions }, ceo ? `${me.label} 승인(최종)` : '최종 승인', '최종 승인했습니다. 3단계 발주 대기로 넘어갑니다.').then((rid) => {
+        tellOpinion(rid);
+        if (rid) notifyQuiet('req_approved', { reqId: rid });
+      });
     void save({ steps, currentStep: next, currentApproverId: steps[next].userId, opinions }, j > d.currentStep ? `${me.label} 전결 승인` : `${me.label} 승인`, '승인했습니다.').then((rid) => {
       if (rid) notifyQuiet('approval_turn', { reqId: rid });
       tellOpinion(rid);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { useSites } from '../../lib/hooks';
@@ -7,6 +7,8 @@ import { audit } from '../../lib/db';
 import { won } from '../../lib/normalize';
 import { Empty, errMsg, PageHeader, useToast } from '../../components/ui';
 import { readKept } from '../../lib/reqKeeper';
+import { pendingLines, usePurchaseOrders } from '../../lib/pos';
+import { isNewReq, readSeen, reqStamp, STALL_DAYS, stalledDays, writeSeen, type Seen } from '../../lib/reqSeen';
 import { REQ_STATUS_LABEL, type ReqStatus, type Requisition } from '../../types';
 
 const STATUS_COLOR: Record<ReqStatus, string> = {
@@ -61,6 +63,21 @@ export default function ReqList() {
   const [status, setStatus] = useState<'' | ReqStatus>('');
   const [q, setQ] = useState('');
   const [proc, setProc] = useState(''); // 공정 이름 필터
+  const pos = usePurchaseOrders();
+  // 새 청구 표시: 카드 숫자는 지금 기준, 목록 '새' 표시는 화면을 연 때 기준 (보는 동안 사라지지 않게)
+  const [seen, setSeenState] = useState<Seen>(() => readSeen(profile?.id));
+  const seenAtOpen = useRef<Seen>(seen);
+  const markSeen = (siteId: string) => {
+    const now = Date.now();
+    const next: Seen = siteId ? { ...seen, sites: { ...seen.sites, [siteId]: now } } : { ...seen, all: now, sites: {} };
+    setSeenState(next);
+    writeSeen(profile?.id, next);
+  };
+  const pickSite = (id: string) => {
+    setSite(id);
+    markSeen(id);
+  };
+  const [showIdle, setShowIdle] = useState(false);
 
   const inbox = reqs.data.filter((r) => isMyTurn(r, profile?.id, can('admin')));
   const shown = useMemo(() => {
@@ -72,6 +89,29 @@ export default function ReqList() {
     if (k) l = l.filter((r) => [r.docNo, r.siteName, r.processName, r.createdByName, r.purpose, ...r.lines.map((x) => x.itemName)].join(' ').toLowerCase().includes(k));
     return l;
   }, [tab, inbox, reqs.data, site, status, q, profile?.id, proc]);
+  /** 현장 카드: 결재 중·내 차례·발주 대기·반려·새 청구·지연 */
+  const cards = useMemo(() => {
+    const waitByReq = new Map<string, number>();
+    for (const p of pendingLines(reqs.data, pos.data)) waitByReq.set(p.req.siteId, (waitByReq.get(p.req.siteId) ?? 0) + 1);
+    const m = new Map<string, { id: string; name: string; n: number; pending: number; mine: number; wait: number; rejected: number; fresh: number; stall: number; last: number }>();
+    for (const sObj of sites.data) m.set(sObj.id, { id: sObj.id, name: sObj.name, n: 0, pending: 0, mine: 0, wait: waitByReq.get(sObj.id) ?? 0, rejected: 0, fresh: 0, stall: 0, last: 0 });
+    for (const r of reqs.data) {
+      if (r.status === 'draft' && r.createdBy !== profile?.id) continue;
+      const c = m.get(r.siteId) ?? { id: r.siteId, name: r.siteName, n: 0, pending: 0, mine: 0, wait: waitByReq.get(r.siteId) ?? 0, rejected: 0, fresh: 0, stall: 0, last: 0 };
+      c.n++;
+      if (r.status === 'pending') c.pending++;
+      if (r.status === 'rejected') c.rejected++;
+      if (isMyTurn(r, profile?.id, can('admin'))) c.mine++;
+      if (isNewReq(r, seen, profile?.name)) c.fresh++;
+      if (stalledDays(r) >= STALL_DAYS) c.stall++;
+      c.last = Math.max(c.last, reqStamp(r));
+      m.set(r.siteId, c);
+    }
+    const list = [...m.values()].sort((a, b) => b.last - a.last || a.name.localeCompare(b.name, 'ko'));
+    return { active: list.filter((c) => c.n), idle: list.filter((c) => !c.n) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqs.data, pos.data, sites.data, seen, profile?.id]);
+  const totalFresh = cards.active.reduce((a, c) => a + c.fresh, 0);
   const procNames = useMemo(() => [...new Set(reqs.data.filter((r) => !site || r.siteId === site).map((r) => r.processName).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'ko')), [reqs.data, site]);
   const trashShown = useMemo(() => {
     let l = reqs.trash;
@@ -123,21 +163,51 @@ export default function ReqList() {
           </div>
         );
       })()}
+      {/* 현장 카드 */}
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        <SiteCard
+          name="전체 현장"
+          active={!site}
+          onClick={() => pickSite('')}
+          c={cards.active.reduce(
+            (a, c) => ({ n: a.n + c.n, pending: a.pending + c.pending, mine: a.mine + c.mine, wait: a.wait + c.wait, rejected: a.rejected + c.rejected, fresh: a.fresh + c.fresh, stall: a.stall + c.stall, last: Math.max(a.last, c.last) }),
+            { n: 0, pending: 0, mine: 0, wait: 0, rejected: 0, fresh: 0, stall: 0, last: 0 },
+          )}
+          dark
+        />
+        {cards.active.map((c) => (
+          <SiteCard key={c.id} name={c.name} c={c} active={site === c.id} onClick={() => pickSite(site === c.id ? '' : c.id)} />
+        ))}
+        {cards.idle.length > 0 && (
+          <button className="rounded-xl border border-dashed border-line px-3 py-2 text-left text-[12px] text-muted hover:bg-white" onClick={() => setShowIdle((v) => !v)}>
+            {showIdle ? '청구 없는 현장 접기' : `청구 없는 현장 ${cards.idle.length}곳 보기`}
+          </button>
+        )}
+        {showIdle && cards.idle.map((c) => <SiteCard key={c.id} name={c.name} c={c} active={site === c.id} onClick={() => pickSite(site === c.id ? '' : c.id)} />)}
+      </div>
+      {totalFresh > 0 && !site && (
+        <div className="mb-2 flex items-center gap-2 text-[12px] text-muted">
+          <span className="h-2 w-2 rounded-full bg-red-500" /> 새 청구·변경 {totalFresh}건 — 현장 카드를 누르면 확인한 것으로 표시됩니다.
+          <button className="underline hover:text-ink" onClick={() => markSeen('')}>
+            모두 확인
+          </button>
+        </div>
+      )}
       <div className="card overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
+          {site && (
+            <span className="chip bg-navy-950 text-white">
+              {sites.data.find((x) => x.id === site)?.name ?? '현장'}
+              <button className="ml-1.5 text-white/70 hover:text-white" onClick={() => setSite('')} title="전체 현장 보기">
+                ✕
+              </button>
+            </span>
+          )}
           <Tab id="all" label="전체" />
           <Tab id="inbox" label="결재함" n={inbox.length} />
           <Tab id="mine" label="내가 쓴 청구" />
           <Tab id="trash" label={`휴지통${reqs.trash.length ? ` ${reqs.trash.length}` : ''}`} />
           <div className="ml-auto flex flex-wrap gap-2">
-            <select className="input h-7" value={site} onChange={(e) => setSite(e.target.value)}>
-              <option value="">전체 현장</option>
-              {sites.data.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
             <select className="input h-7" value={proc} onChange={(e) => setProc(e.target.value)}>
               <option value="">전체 공정</option>
               {procNames.map((p) => (
@@ -261,6 +331,8 @@ export default function ReqList() {
                   <div className="flex items-center gap-2">
                     <StatusChip s={r.status} />
                     {mine && <span className="chip bg-amber-brand text-navy-950">내 차례</span>}
+                    {isNewReq(r, seenAtOpen.current, profile?.name) && <span className="chip bg-red-500 text-white">새</span>}
+                    {stalledDays(r) >= STALL_DAYS && <span className="chip bg-red-50 text-red-600">{stalledDays(r)}일 지연</span>}
                     <span className="ml-auto text-[11.5px] text-muted">{r.requestDate}</span>
                   </div>
                   <div className="text-[14.5px] font-bold text-navy-950">
@@ -301,12 +373,13 @@ export default function ReqList() {
               </thead>
               <tbody>
                 {shown.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} className={isNewReq(r, seenAtOpen.current, profile?.name) ? 'bg-red-50/40' : ''}>
                     <td className="whitespace-nowrap">{r.requestDate}</td>
-                    <td>
+                    <td className="whitespace-nowrap">
                       <Link to={`/req/${r.id}`} className="font-semibold text-navy-900 hover:text-amber-700 hover:underline">
                         {r.docNo || '(번호 없음)'}
                       </Link>
+                      {isNewReq(r, seenAtOpen.current, profile?.name) && <span className="chip ml-1 bg-red-500 text-[10.5px] text-white">새</span>}
                     </td>
                     <td>{r.siteName}</td>
                     <td className="whitespace-nowrap">{r.processName ? <span className="chip bg-navy-950/5 text-navy-900">{r.processName}</span> : <span className="text-muted">-</span>}</td>
@@ -328,7 +401,12 @@ export default function ReqList() {
                           />
                         ))}
                       </div>
-                      {r.status === 'pending' && <div className="mt-0.5 text-[11px] text-muted">{r.steps[r.currentStep]?.label} {r.steps[r.currentStep]?.userName}</div>}
+                      {r.status === 'pending' && (
+                        <div className="mt-0.5 text-[11px] text-muted">
+                          {r.steps[r.currentStep]?.label} {r.steps[r.currentStep]?.userName}
+                          {stalledDays(r) >= STALL_DAYS && <b className="ml-1 text-red-600">{stalledDays(r)}일 지연</b>}
+                        </div>
+                      )}
                     </td>
                     <td className="text-muted">{r.createdByName}</td>
                   </tr>
@@ -340,5 +418,32 @@ export default function ReqList() {
         )}
       </div>
     </div>
+  );
+}
+
+type CardCount = { n: number; pending: number; mine: number; wait: number; rejected: number; fresh: number; stall: number; last: number };
+function SiteCard({ name, c, active, onClick, dark }: { name: string; c: CardCount; active: boolean; onClick: () => void; dark?: boolean }) {
+  const ago = c.last ? Math.floor((Date.now() - c.last) / 86400000) : -1;
+  return (
+    <button
+      onClick={onClick}
+      className={`relative flex flex-col gap-1 rounded-xl border px-3 py-2 text-left transition ${
+        active ? 'border-amber-brand bg-amber-soft/60 ring-2 ring-amber-brand/40' : dark ? 'border-navy-950 bg-navy-950 text-white hover:bg-navy-900' : 'border-line bg-white hover:border-amber-brand/60'
+      } ${!c.n && !dark ? 'opacity-60' : ''}`}
+    >
+      {c.fresh > 0 && <span className="absolute -right-1.5 -top-1.5 rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white shadow">새 {c.fresh}</span>}
+      <div className={`truncate text-[13.5px] font-bold ${active ? 'text-navy-950' : ''}`}>{name}</div>
+      <div className="flex flex-wrap gap-1 text-[11px]">
+        {c.mine > 0 && <span className="rounded bg-amber-brand px-1.5 font-semibold text-navy-950">내 차례 {c.mine}</span>}
+        {c.pending > 0 && <span className="rounded bg-amber-100 px-1.5 text-amber-800">결재 중 {c.pending}</span>}
+        {c.wait > 0 && <span className="rounded bg-emerald-50 px-1.5 text-emerald-700">발주 대기 {c.wait}줄</span>}
+        {c.rejected > 0 && <span className="rounded bg-red-50 px-1.5 text-red-600">반려 {c.rejected}</span>}
+        {c.stall > 0 && <span className="rounded bg-red-600 px-1.5 font-semibold text-white">지연 {c.stall}</span>}
+        {!c.mine && !c.pending && !c.wait && !c.rejected && !c.stall && <span className={dark && !active ? 'text-white/50' : 'text-muted'}>처리할 것 없음</span>}
+      </div>
+      <div className={`text-[10.5px] ${dark && !active ? 'text-white/50' : 'text-muted'}`}>
+        청구 {c.n}건{ago >= 0 ? ` · 최근 ${ago === 0 ? '오늘' : `${ago}일 전`}` : ''}
+      </div>
+    </button>
   );
 }
