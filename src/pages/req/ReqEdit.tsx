@@ -1543,6 +1543,8 @@ export default function ReqEdit() {
                   const locked = !!d.id && d.status === 'pending' && !!ordered.get(`${d.id}|${l.key}`);
                   const rowEd = editable && !locked;
                   const rowOrderEd = orderEditable && !locked;
+                  // 거래선: 단가와 달리 현장소장·현장담당도 작성·수정할 수 있을 때 고칠 수 있다
+                  const rowVendorEd = rowOrderEd || rowEd;
                   const remain = l.execQty ? l.execQty - pq - l.reqQty : null;
                   return (
                     <tr
@@ -1772,7 +1774,7 @@ export default function ReqEdit() {
                         <span className="fit-text">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</span>
                       </td>
                       <td className="fit bg-amber-soft/40">
-                        {rowOrderEd ? (
+                        {rowVendorEd ? (
                           <PickInput
                             className="w-full"
                             value={l.vendorName ?? ''}
