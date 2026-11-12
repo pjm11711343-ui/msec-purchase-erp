@@ -7,6 +7,7 @@
 //  approval_turn 청구서 결재 차례 → 결재자 개인 텔레그램                      (사내)
 //  delivery_plan 업체 납품 일정 → 현장 단톡방 + 자재부 텔레그램              (업체·자재부)
 //  approval_opinion 결재자 의견·지시 → 청구서 작성자 + 현장 단톡방                (사내)
+//  account_request 초기화면 계정 신청 → 자재부 텔레그램                       (신청자 본인)
 //  rfq_sent      견적 의뢰 → 업체 메일(의뢰서 PDF·포털 링크)                 (자재부·관리자)
 import { esc, fail, getDoc, HttpError, sendMail, sendTelegram, verifyUser, type Res } from './_lib/common.js';
 
@@ -28,6 +29,15 @@ export default async function handler(req: Req, res: Res) {
     const event = String(body?.event ?? '');
     const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'msec-purchase-erp.vercel.app');
     const origin = `https://${host}`;
+
+    if (event === 'account_request') {
+      // 아직 ERP 사용자가 아닌 신청자 본인이 부른다: 본인 신청서만 읽힌다
+      const r = await getDoc<{ loginId: string; name: string; phone?: string; memo?: string; role: string; siteNames?: string[]; status: string; createdAt?: number; notifiedAt?: number }>(me.token, `erp_accountRequests/${me.uid}`);
+      if (!r || r.status !== 'pending') return res.status(200).json({ ok: true, telegram: 'skipped' });
+      const msg = `🙋 <b>계정 신청</b> ${esc(r.role === 'siteManager' ? '현장소장' : '현장담당')}\n${esc(r.name)} (${esc(r.loginId)})${r.phone ? ` · ${esc(r.phone)}` : ''}\n현장: ${esc((r.siteNames ?? []).join(', '))}${r.memo ? `\n메모: ${esc(r.memo)}` : ''}\n\n승인: ${origin}/master/users`;
+      const sent = await sendTelegram(process.env.TELEGRAM_OFFICE_CHAT_ID, msg);
+      return res.status(200).json({ ok: true, telegram: sent });
+    }
 
     const staff = await getDoc<{ name: string; role: string; active: boolean; position?: string }>(me.token, `erp_users/${me.uid}`);
     const vendorAcc = staff ? null : await getDoc<{ vendorId: string; vendorName: string; active: boolean }>(me.token, `erp_vendorAccounts/${me.uid}`);

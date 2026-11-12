@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import { AccountPending } from './pages/AccountApply';
 import Dashboard from './pages/Dashboard';
 import Summary from './pages/Summary';
 import Invoices from './pages/Invoices';
@@ -62,7 +63,19 @@ export default function App() {
         </div>
       </div>
     );
-  if (!profile || !profile.active)
+  if (!profile)
+    return (
+      <AccountPendingOr uid={fbUser.uid} logout={logout}>
+        <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+          <div className="text-[16px] font-semibold">ERP에 등록되지 않은 계정입니다.</div>
+          <div className="text-muted">관리자에게 사용자 등록을 요청하세요. ({fbUser.email})</div>
+          <button className="btn-ghost" onClick={logout}>
+            로그아웃
+          </button>
+        </div>
+      </AccountPendingOr>
+    );
+  if (!profile.active)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <div className="text-[16px] font-semibold">{profile ? '사용이 중지된 계정입니다.' : 'ERP에 등록되지 않은 계정입니다.'}</div>
@@ -108,4 +121,9 @@ export default function App() {
       </Route>
     </Routes>
   );
+}
+
+/** 계정 신청 기록이 있으면 승인 대기/반려 화면, 없으면 기본 안내 */
+function AccountPendingOr({ uid, logout, children }: { uid: string; logout: () => void; children: React.ReactNode }) {
+  return <AccountPending uid={uid} logout={logout} fallback={children} />;
 }

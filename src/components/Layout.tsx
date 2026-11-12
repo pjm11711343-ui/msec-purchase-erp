@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, orderBy } from 'firebase/firestore';
+import { useCollection } from '../lib/db';
+import { usePublicSiteSync } from '../lib/accountRequests';
+import { usePendingRequests } from '../pages/master/AccountRequests';
 import { C, db } from '../lib/firebase';
-import { EXEC_MENUS, execMenuOf, MENU_ROLES, roleMenusOf, type Settings } from '../types';
+import { EXEC_MENUS, execMenuOf, MENU_ROLES, roleMenusOf, type Settings, type Site } from '../types';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL, type Role } from '../types';
 import { usePurchaseOrders } from '../lib/pos';
@@ -71,6 +74,14 @@ const GROUPS: { title: string; items: Item[] }[] = [
   },
 ];
 
+function OfficeSync({ admin, onPending }: { admin: boolean; onPending: (n: number) => void }) {
+  const sites = useCollection<Site>(C.sites, [orderBy('code')]);
+  usePublicSiteSync(sites.data, true, !sites.loading && !sites.error);
+  const pending = usePendingRequests(admin);
+  useEffect(() => onPending(pending.length), [pending.length, onPending]);
+  return null;
+}
+
 export default function Layout() {
   const { profile, logout } = useAuth();
   const role = profile?.role;
@@ -98,6 +109,7 @@ export default function Layout() {
   const blocked = isExec && execMenus !== undefined && !!curMenu && !execAllowed(curMenu.to);
   const firstAllowed = EXEC_MENUS.find((m) => execAllowed(m.to))?.to;
   const [pwOpen, setPwOpen] = useState(false);
+  const [reqCount, setReqCount] = useState(0);
   const [mini, setMini] = useState(() => {
     try {
       return localStorage.getItem('erp.navMini') === '1';
@@ -119,6 +131,7 @@ export default function Layout() {
   const curLabel = GROUPS.flatMap((g) => g.items).find((i) => (i.to === '/' ? loc.pathname === '/' : loc.pathname.startsWith(i.to)))?.label ?? '';
   return (
     <div className="flex h-full flex-col lg:flex-row">
+      {(role === 'admin' || role === 'material') && <OfficeSync admin={role === 'admin'} onPending={setReqCount} />}
       {/* 폰·태블릿 위쪽 막대 */}
       <header className="no-print sticky top-0 z-30 flex items-center gap-2 bg-navy-950 px-3 py-2 text-white lg:hidden">
         <button className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/8" aria-label="메뉴 열기" onClick={() => setOpen(true)}>
@@ -181,6 +194,7 @@ export default function Layout() {
                       }
                     >
                       <span className={mini ? 'lg:hidden' : ''}>{i.label}</span>
+                      {i.to === '/master/users' && reqCount > 0 && <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[10.5px] font-bold text-white" title="계정 신청 대기">{reqCount}</span>}
                       {mini && <span className="hidden lg:inline">{i.label.replace(/\s/g, '').slice(0, 2)}</span>}
                     </NavLink>
                   ),

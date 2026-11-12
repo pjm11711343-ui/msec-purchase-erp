@@ -23,7 +23,26 @@ export interface ErpUser {
   position?: string; // 직급
   signImage?: string; // 결재 싸인 (PNG data URL, 바탕 투명)
   telegramChatId?: string; // 개인 텔레그램 (결재 차례 알림)
+  phone?: string; // 휴대폰
   menus?: string[] | null; // 결재자 개인별 보일 메뉴 (없으면 설정의 공통값)
+}
+
+/** 초기화면 계정 신청 (문서 id = 신청자 uid) */
+export interface AccountRequest {
+  id: string;
+  loginId: string;
+  email: string;
+  name: string;
+  phone?: string;
+  memo?: string;
+  role: 'siteManager' | 'siteStaff';
+  siteIds: string[];
+  siteNames: string[];
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  decidedAt?: number;
+  decidedBy?: string;
+  rejectReason?: string;
 }
 
 export interface Site {

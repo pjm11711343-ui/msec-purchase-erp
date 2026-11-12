@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { isConfigured } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import { errMsg, Field } from '../components/ui';
+import { AccountApplyForm } from './AccountApply';
 
 export default function Login() {
   const { login, vendorLogin } = useAuth();
+  const [apply, setApply] = useState(false);
   const [mode, setMode] = useState<'login' | 'vendor'>(() => (new URLSearchParams(location.search).has('vendor') ? 'vendor' : 'login'));
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
@@ -37,6 +39,10 @@ export default function Login() {
             Firebase 설정이 비어 있습니다. 프로젝트 폴더의 .env 파일에 값을 넣고 다시 실행하세요. (README 2번 참고)
           </div>
         )}
+        {apply ? (
+          <AccountApplyForm onCancel={() => setApply(false)} />
+        ) : (
+        <>
         <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-white/10 p-1">
           {(['login', 'vendor'] as const).map((m) => (
             <button
@@ -54,14 +60,21 @@ export default function Login() {
           <Field label={mode === 'vendor' ? '업체코드' : '아이디 또는 이메일'}>
             <input className="input" value={id} onChange={(e) => setId(e.target.value)} autoComplete="username" autoFocus />
           </Field>
-          <Field label={mode === 'vendor' ? '접속코드' : '비밀번호'} hint={mode === 'vendor' ? '명신기공 자재부에서 받은 업체코드와 접속코드를 넣으세요' : '계정이 없으면 관리자에게 요청하세요'}>
+          <Field label={mode === 'vendor' ? '접속코드' : '비밀번호'} hint={mode === 'vendor' ? '명신기공 자재부에서 받은 업체코드와 접속코드를 넣으세요' : undefined}>
             <input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
           </Field>
           {err && <div className="rounded-md bg-red-50 px-3 py-2 text-[12.5px] text-red-600">{err}</div>}
           <button className="btn-primary mt-1 h-9" disabled={busy || !id || !pw}>
             {busy ? '처리 중…' : '로그인'}
           </button>
+          {mode === 'login' && (
+            <button type="button" className="text-[12.5px] text-muted hover:text-ink hover:underline" onClick={() => setApply(true)}>
+              계정이 없나요? <b className="text-navy-950">현장소장·현장담당 계정 신청</b>
+            </button>
+          )}
         </form>
+        </>
+        )}
       </div>
     </div>
   );

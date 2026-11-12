@@ -57,6 +57,8 @@ export function loginToEmail(input: string): string {
 /** ERP 컬렉션 이름 — 단가관리시스템 컬렉션과 섞이지 않게 접두어를 붙인다 */
 export const C = {
   users: 'erp_users',
+  accountRequests: 'erp_accountRequests', // 현장소장·현장담당 계정 신청 (초기화면)
+  publicInfo: 'erp_public', // 로그인 전에도 읽는 공개 정보 (현장 이름 목록)
   sites: 'erp_sites',
   vendors: 'erp_vendors',
   standardCategories: 'erp_standardCategories',

@@ -5,6 +5,7 @@ import { deleteField, orderBy } from 'firebase/firestore';
 import { audit, commitBatch, useCollection } from '../../lib/db';
 import { prepareSign } from '../../lib/sign';
 import TelegramChatFinder from '../../components/TelegramChatFinder';
+import AccountRequests from './AccountRequests';
 import { auth, C, idToEmail, ID_LOGIN_DOMAIN } from '../../lib/firebase';
 import { useSites } from '../../lib/hooks';
 import { Empty, errMsg, Field, Modal, PageHeader, useToast } from '../../components/ui';
@@ -171,6 +172,7 @@ export default function Users() {
           </div>
         }
       />
+      <AccountRequests />
       <div className="mb-3 flex flex-wrap gap-1 rounded-xl border border-line bg-white p-1">
         {(['all', ...ROLE_ORDER] as const).map((k) => {
           const n = k === 'all' ? sorted.length : sorted.filter((u) => u.role === k).length;

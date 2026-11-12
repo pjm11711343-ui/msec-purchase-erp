@@ -41,6 +41,28 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // 초기화면 현장 계정 신청 (문서 id = 신청자 uid) — 신청 즉시 만든 계정은 관리자 승인 전까지 ERP 사용자가 아니다
+    match /erp_accountRequests/{uid} {
+      allow read: if isAdmin() || (erpSignedIn() && request.auth.uid == uid);
+      allow create: if erpSignedIn() && request.auth.uid == uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role in ['siteManager', 'siteStaff']
+        && !exists(erpUserPath());
+      allow update: if isAdmin()
+        || (erpSignedIn() && request.auth.uid == uid
+            && resource.data.status == 'rejected'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.role in ['siteManager', 'siteStaff']
+            && request.resource.data.loginId == resource.data.loginId
+            && request.resource.data.email == resource.data.email);
+      allow delete: if isAdmin();
+    }
+    // 로그인 전에도 읽는 공개 정보 (계정 신청 화면의 현장 이름 목록)
+    match /erp_public/{id} {
+      allow read: if true;
+      allow write: if isOffice();
+    }
+
     match /erp_settings/bootstrap {
       allow get: if true;
       allow create: if erpSignedIn()
