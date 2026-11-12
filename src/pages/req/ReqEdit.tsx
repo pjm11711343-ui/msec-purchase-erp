@@ -269,7 +269,9 @@ export default function ReqEdit() {
 
   // 작성중·반려: 작성자·자재부 / 결재 중(최종 승인 전): 작성자·자재부·결재선에 있는 사람도 내용 수정 가능
   const draftEditable = !readOnly && !inTrash && (d.status === 'draft' || d.status === 'rejected') && (d.createdBy === profile?.id || isOffice);
-  const pendEditable = !readOnly && !inTrash && d.status === 'pending' && (d.createdBy === profile?.id || isOffice || d.steps.some((s) => s.userId && s.userId === profile?.id));
+  // 현장소장·현장담당은 결재 요청 후에는 고칠 수 없다 (고치려면 '결재 회수' 또는 반려 후)
+  const isSiteRole = profile?.role === 'siteManager' || profile?.role === 'siteStaff';
+  const pendEditable = !readOnly && !inTrash && d.status === 'pending' && (isOffice || (!isSiteRole && (d.createdBy === profile?.id || d.steps.some((s) => s.userId && s.userId === profile?.id))));
   const editable = draftEditable || pendEditable;
   const myTurn = !!d.id && isMyTurn(d as Requisition, profile?.id, can('admin'));
   // 관리자: 대표이사까지 승인이 끝난 뒤에도 거래선·발주 단가는 고칠 수 있다 (발주된 줄은 발주서에서)
@@ -1110,6 +1112,12 @@ export default function ReqEdit() {
           </>
         }
       />
+      {isSiteRole && d.status === 'pending' && (
+        <div className="no-print mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12.5px] text-sky-900">
+          🔒 결재 요청이 끝난 청구서는 현장에서 고칠 수 없습니다.
+          {d.createdBy === profile?.id ? ' 본사 결재 전이면 [결재 회수]로 되돌려 고친 뒤 다시 올리세요. 본사 결재가 시작됐으면 자재부에 수정을 요청하거나 반려받은 뒤 고치세요.' : ' 고칠 내용은 자재부에 요청하세요.'}
+        </div>
+      )}
       {restored && (
         <div className="no-print mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12.5px] text-sky-900">
           {restored.offer ? (
