@@ -9,17 +9,26 @@ export function pipeLength(itemName: string): number | null {
   return null;
 }
 
-/** 본 수 표시: 단위 M이고 배관이면 금회청구 수량 ÷ 1본 길이, 소수 1자리 (예: 1.0본) */
-export function bonText(l: { itemName: string; unit: string; reqQty: number; orderQty?: number }): string {
+type BonLine = { itemName: string; unit: string; reqQty: number; orderQty?: number; bonLen?: number };
+/** 실제로 쓰는 1본 길이: 줄에 지정한 길이 > 품명 자동 (0 = 표시 안 함) */
+export function lineBonLen(l: BonLine): number | null {
+  if (l.bonLen === 0) return null;
+  if (l.bonLen && l.bonLen > 0) return l.bonLen;
+  return pipeLength(l.itemName);
+}
+/** 본 수 표시: 단위 M이고 배관이면 금회청구 수량 ÷ 1본 길이, 소수 1자리 (예: 1.0본).
+ *  줄마다 길이를 바꾼 경우 길이를 함께 표시 (예: 6.0본(5.5m)) */
+export function bonText(l: BonLine): string {
   if (!/^M$/i.test((l.unit || '').trim())) return '';
-  const len = pipeLength(l.itemName);
+  const len = lineBonLen(l);
   const q = l.reqQty || l.orderQty || 0;
   if (!len || !q) return '';
-  return `${(q / len).toFixed(1)}본`;
+  const auto = pipeLength(l.itemName);
+  return `${(q / len).toFixed(1)}본${l.bonLen && l.bonLen !== auto ? `(${l.bonLen}m)` : ''}`;
 }
 
 /** 본/(비고) 칸: 본 수 + (비고) */
-export function bonNote(l: { itemName: string; unit: string; reqQty: number; orderQty?: number; note?: string }): string {
+export function bonNote(l: BonLine & { note?: string }): string {
   const b = bonText(l);
   const n = (l.note || '').trim();
   return b && n ? `${b} (${n})` : b || n;

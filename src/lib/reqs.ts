@@ -86,7 +86,7 @@ export function newLine(): ReqLine {
   };
 }
 
-export { bonNote, bonText, pipeLength } from './pipe';
+export { bonNote, bonText, lineBonLen, pipeLength } from './pipe';
 
 /** 휴지통에서 복원 */
 export async function restoreReq(r: Requisition, who: string) {

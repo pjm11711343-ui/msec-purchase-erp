@@ -237,6 +237,7 @@ export interface ReqLine {
   aliasHit?: boolean; // 기억된 다른 표기로 자동 인식
   reqQty: number; // 금회청구
   note?: string; // 본/(비고)
+  bonLen?: number; // 이 줄만 배관 1본 길이(m) 지정 (0 = 본수 표시 안 함, 없으면 품명으로 자동)
   orderQty: number; // 발주수량 (본사 작성)
   orderPrice: number; // 단가 (본사 작성)
   priceSource?: '지정단가' | '계산서' | 'ERP단가' | '단가표' | '직전발주' | '직접입력' | '엑셀';

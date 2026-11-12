@@ -8,7 +8,7 @@ import { fillReqForm, usePurposeOf } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, priceVendorIs, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
-import { bonText, lastOrderPrice, lineAmount, restoreReq, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
+import { bonText, lineBonLen, pipeLength, lastOrderPrice, lineAmount, restoreReq, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
 import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
@@ -1751,7 +1751,7 @@ export default function ReqEdit() {
                         })()}
                       </td>
                                             <td>
-                        {bonText(l) && <div className="pt-1 text-center text-[11.5px] font-semibold text-navy-900" title="금회청구 수량 ÷ 배관 1본 길이">{bonText(l)}</div>}
+                        <BonCell l={l} edit={rowEd} onSet={(v) => setLine(l.key, { bonLen: v })} />
                         {rowEd || l.note ? T(l.key, 'note', l.note, rowEd, 'w-full', { placeholder: bonText(l) ? '(비고)' : '' }) : null}
                       </td>
 <td className={`num ${overOrder(l) ? 'bg-red-50 font-semibold text-red-700' : 'bg-amber-soft/40'}`} title={overOrder(l) ? '발주수량이 금회청구보다 많습니다' : undefined}>
@@ -2516,6 +2516,88 @@ function VendorCells({ byVendor }: { byVendor: Record<string, number> }) {
           <div className="border-b border-dotted border-line px-1 text-[10.5px] text-muted">계</div>
           <div className="px-1 py-0.5 text-right font-bold text-ink">{won(total)}</div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** 본/(비고) 칸의 본수: 누르면 이 줄만 1본 길이를 바꾼다 */
+function BonCell({ l, edit, onSet }: { l: ReqLine; edit: boolean; onSet: (v: number | undefined) => void }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState('');
+  const isM = /^M$/i.test((l.unit || '').trim());
+  const auto = pipeLength(l.itemName);
+  const cur = lineBonLen(l);
+  const text = bonText(l);
+  if (!isM || (!text && !edit) || (!edit && !text)) return null;
+  if (!edit) return <div className="pt-1 text-center text-[11.5px] font-semibold text-navy-900" title={`금회청구 수량 ÷ 1본 ${cur}m`}>{text}</div>;
+  if (!auto && l.bonLen === undefined && !open)
+    return (
+      <div className="pt-0.5 text-center">
+        <button type="button" className="text-[10.5px] text-muted hover:text-navy-900 hover:underline" onClick={() => setOpen(true)} title="배관이면 1본 길이를 정해 본수를 표시합니다">
+          + 본수
+        </button>
+      </div>
+    );
+  const pick = (v: number | undefined) => {
+    onSet(v === auto ? undefined : v);
+    setOpen(false);
+    setCustom('');
+  };
+  return (
+    <div className="relative pt-0.5 text-center">
+      <button
+        type="button"
+        className={`rounded px-1 text-[11.5px] font-semibold ${l.bonLen !== undefined ? 'bg-amber-soft text-amber-900' : 'text-navy-900'} hover:bg-amber-soft`}
+        onClick={() => setOpen((o) => !o)}
+        title={l.bonLen !== undefined ? `이 줄만 1본 ${l.bonLen === 0 ? '표시 안 함' : l.bonLen + 'm'} (자동 ${auto ?? '-'}m)` : `자동: 1본 ${auto}m · 눌러서 이 줄만 바꾸기`}
+      >
+        {text || (l.bonLen === 0 ? '본수 끔' : '본수 ?')} ▾
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-6 z-40 w-44 rounded-lg border border-line bg-white p-1.5 text-left text-[12px] shadow-lg">
+            <div className="px-2 pb-1 text-[11px] text-muted">이 줄 1본 길이</div>
+            {[3, 4, 5, 5.5, 6, 12, 15].map((v) => (
+              <button key={v} type="button" className={`block w-full rounded px-2 py-1 text-left hover:bg-canvas ${cur === v ? 'bg-amber-soft font-semibold' : ''}`} onClick={() => pick(v)}>
+                {v} m{v === auto ? ' (자동)' : ''}
+              </button>
+            ))}
+            <div className="flex items-center gap-1 px-2 py-1">
+              <input
+                className="input h-6 w-16 px-1 text-[12px]"
+                inputMode="decimal"
+                placeholder="직접"
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && +custom > 0) pick(+custom);
+                }}
+              />
+              m
+              <button type="button" className="btn-ghost ml-auto h-6 px-1.5 text-[11px]" disabled={!(+custom > 0)} onClick={() => pick(+custom)}>
+                적용
+              </button>
+            </div>
+            <div className="my-1 border-t border-line" />
+            {auto && l.bonLen !== undefined && (
+              <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-canvas" onClick={() => pick(undefined)}>
+                자동으로 되돌리기 ({auto} m)
+              </button>
+            )}
+            {!auto && l.bonLen !== undefined && (
+              <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-canvas" onClick={() => pick(undefined)}>
+                지정 취소
+              </button>
+            )}
+            {(auto || l.bonLen) ? (
+              <button type="button" className="block w-full rounded px-2 py-1 text-left text-muted hover:bg-canvas" onClick={() => (onSet(0), setOpen(false))}>
+                본수 표시 안 함
+              </button>
+            ) : null}
+          </div>
+        </>
       )}
     </div>
   );
