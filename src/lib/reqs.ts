@@ -66,6 +66,17 @@ export function lastOrderPrice(reqs: Requisition[], item: string, spec: string):
   return undefined;
 }
 
+/** 그 업체에 승인된 직전 발주 단가 */
+export function lastOrderPriceFor(reqs: Requisition[], item: string, spec: string, vendorId: string): { price: number; date: string } | undefined {
+  const k = priceKey(item, spec);
+  for (const r of reqs) {
+    if (r.status !== 'approved') continue;
+    const l = r.lines.find((x) => priceKey(x.itemName, x.spec) === k && x.orderPrice > 0 && x.vendorId === vendorId);
+    if (l) return { price: l.orderPrice, date: r.requestDate };
+  }
+  return undefined;
+}
+
 export function lineAmount(l: ReqLine) {
   return Math.round((l.orderQty || 0) * (l.orderPrice || 0));
 }

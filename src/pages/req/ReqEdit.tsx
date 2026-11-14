@@ -8,7 +8,7 @@ import { fillReqForm, usePurposeOf } from '../../lib/reqForm';
 import { looselyEqual, nameKey, num, won } from '../../lib/normalize';
 import { readWorkbook } from '../../lib/parsers';
 import { findPrices, priceKey, priceVendorIs, sameVendor, usePrices, type PriceRow } from '../../lib/prices';
-import { bonText, lineBonLen, pipeLength, lastOrderPrice, lineAmount, restoreReq, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
+import { bonText, lineBonLen, pipeLength, lastOrderPrice, lastOrderPriceFor, lineAmount, restoreReq, newLine, priorQtyMap, useApprovalLines, useRequisitions, useUsers } from '../../lib/reqs';
 import { parseReqSheet } from '../../lib/reqExcel';
 import { orderedKeys, usePurchaseOrders } from '../../lib/pos';
 import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../../components/ui';
@@ -307,7 +307,7 @@ export default function ReqEdit() {
     const have = new Set(d.lines.filter((l) => l.itemName.trim()).map((l) => itemKey(l.itemName, l.spec)));
     const add = baseSheet.lines.filter((b) => !b.off && !have.has(itemKey(b.itemName, b.spec))).map((b) => ({ ...newLine(), ...fromBase(b) }) as ReqLine);
     if (!add.length) return toast('기본 청구서 품목이 이미 모두 들어가 있습니다.');
-    setD({ ...d, lines: [...d.lines.filter((l) => l.itemName.trim()), ...add.map((l) => ({ ...l, ...(!l.orderPrice ? suggest(l) : {}), ...autoCat(l) }))] });
+    setD({ ...d, lines: [...d.lines.filter((l) => l.itemName.trim()), ...add.map((l) => (((y) => ({ ...y, ...(!y.orderPrice ? suggest(y) : {}) }))({ ...l, ...autoCat(l) })))] });
     toast(`기본 청구서 품목 ${add.length}줄을 불러왔습니다. 금회청구 수량을 넣으세요. (수량이 빈 내역 줄은 결재 올릴 때 빠집니다)`);
   };
   const setProcess = (p: { zoneId?: string; tradeId?: string; zoneSub?: string }) => {
@@ -322,15 +322,32 @@ export default function ReqEdit() {
   const DealerChip = ({ vid, catId }: { vid?: string; catId?: string }) => (dealerRank(vid, catId) ? <span className="chip ml-1 bg-teal-50 text-[10.5px] text-teal-700">대리점 {dealerRank(vid, catId)}순위</span> : null);
   const setLine = (key: string, patch: Partial<ReqLine>) => setD((x) => x && { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
-  /** 단가 자동: 현장 지정단가 → 현장 대리점(우선순위) → 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
+  /** 단가 자동: 현장 지정단가 → (거래선을 골랐으면 그 업체 단가만) → 현장 대리점(자재분류별 우선순위) → 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
   const suggest = (l: ReqLine): Partial<ReqLine> => {
     if (!l.itemName) return {};
     // 현장 지정단가가 맨 먼저
     const fp = pickFixedPrice(priceList.data, l.itemName, l.spec, d.siteId, l.vendorId || undefined);
     if (fp) return { orderPrice: fp.price, priceSource: '지정단가', unit: l.unit || fp.unit, ...(!l.vendorId ? { vendorId: fp.vendorId, vendorName: fp.vendorName } : {}) };
-    // 현장 대리점 (우선순위 순): 단가관리시스템 단가 → ERP 품목·단가. 거래선을 이미 다른 업체로 골랐으면 건너뜀
+    // 거래선을 먼저 고른 줄: 그 업체 단가만 찾는다 (계산서 → ERP 품목·단가 → 단가관리 → 직전 발주). 없으면 단가는 비워 둔다
+    if (l.vendorId) {
+      const v = vendors.data.find((x) => x.id === l.vendorId);
+      const src = (dealerRank(l.vendorId, l.siteCategoryId) ? '대리점' : null) as ReqLine['priceSource'] | null;
+      const ip = invoicePrice(l.itemName, l.spec, d.siteId);
+      if (ip && ip.vid === l.vendorId) {
+        const u = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`)?.u;
+        return { orderPrice: ip.p, priceSource: src ?? '계산서', ...(u && !l.unit ? { unit: u } : {}) };
+      }
+      const de = pickListPrice(priceList.data, l.itemName, l.spec, d.siteId, l.vendorId);
+      if (de && de.vendorId === l.vendorId) return { orderPrice: de.price, priceSource: src ?? 'ERP단가', unit: l.unit || de.unit };
+      const pm = v ? findPrices(prices.rows, l.itemName, l.spec).find((p) => priceVendorIs(p, v)) : undefined;
+      if (pm) return { orderPrice: pm.buyPrice, priceSource: src ?? '단가표', unit: l.unit || pm.unit };
+      const lv = lastOrderPriceFor(reqs.data, l.itemName, l.spec, l.vendorId);
+      if (lv) return { orderPrice: lv.price, priceSource: '직전발주' };
+      return {};
+    }
+    // 현장 대리점 (자재분류에 맞는 우선순위 순): 단가관리시스템 단가 → ERP 품목·단가
     const dealers = dealersFor(siteObj, l.siteCategoryId).map((id) => vendors.data.find((v) => v.id === id)).filter((v): v is Vendor => !!v);
-    for (const dv of l.vendorId ? dealers.filter((v) => v.id === l.vendorId) : dealers) {
+    for (const dv of dealers) {
       const pm = findPrices(prices.rows, l.itemName, l.spec).find((p) => priceVendorIs(p, dv));
       if (pm) return { orderPrice: pm.buyPrice, priceSource: '대리점', unit: l.unit || pm.unit, ...(!l.vendorId ? { vendorId: dv.id, vendorName: dv.name } : {}) };
       const de = pickListPrice(priceList.data, l.itemName, l.spec, d.siteId, dv.id);
@@ -376,7 +393,7 @@ export default function ReqEdit() {
   const autoPrice = (key: string) =>
     setD((x) => {
       if (!x) return x;
-      return { ...x, lines: x.lines.map((l) => (l.key === key ? (((y) => ({ ...y, ...baseFill(y) }))({ ...l, ...(!l.orderPrice ? suggest(l) : {}), ...autoCat(l) })) : l)) };
+      return { ...x, lines: x.lines.map((l) => (l.key === key ? (((y) => ({ ...y, ...baseFill(y) }))(((c) => ({ ...c, ...(!c.orderPrice ? suggest(c) : {}) }))({ ...l, ...autoCat(l) }))) : l)) };
     });
 
   /** 새 품목: 자재부·관리자는 바로 등록, 현장은 등록 요청 (요청 중에도 사용 가능) */
@@ -789,6 +806,15 @@ export default function ReqEdit() {
       const patch = { vendorId: v?.id, vendorName: v?.name };
       let lines = x.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
       if (v) lines = fillBetween(lines, idx, (l) => l.vendorId ?? '', patch, (l) => !isLocked(l));
+      // 거래선을 바꾸면 자동으로 불러온 단가는 그 업체 단가로 다시 불러온다 (직접 입력·엑셀 단가는 그대로)
+      if (v)
+        lines = lines.map((l, i) => {
+          const before = x.lines[i];
+          if (!l.itemName || isLocked(l) || before?.vendorId === l.vendorId) return l;
+          if (l.orderPrice && (l.priceSource === '직접입력' || l.priceSource === '엑셀' || !l.priceSource)) return l;
+          const base = { ...l, orderPrice: 0, priceSource: undefined };
+          return { ...base, ...suggest(base) };
+        });
       return { ...x, lines };
     });
   };
@@ -1800,6 +1826,11 @@ export default function ReqEdit() {
                           )}
                         </div>
                         {l.priceSource && <div className={`text-right text-[10px] ${l.priceSource === '지정단가' ? 'font-semibold text-violet-700' : l.priceSource === '대리점' ? 'font-semibold text-teal-700' : 'text-muted'}`}>{l.priceSource}</div>}
+                        {!l.orderPrice && l.itemName && l.vendorId && (
+                          <button className="block w-full text-right text-[10px] font-semibold text-red-600 enabled:hover:underline" disabled={!rowOrderEd} onClick={() => setPriceFor(l.key)} title={rowOrderEd ? '다른 업체 단가 보기' : '자재부가 단가를 넣습니다'}>
+                            이 거래선 단가 없음
+                          </button>
+                        )}
                       </td>
                       <td className="num bg-amber-soft/40 pt-2">
                         <span className="fit-text">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</span>
