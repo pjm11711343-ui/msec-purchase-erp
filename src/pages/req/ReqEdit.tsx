@@ -315,14 +315,25 @@ export default function ReqEdit() {
     setD(n);
   };
 
+  /** 현장 대리점 순위 (0 = 대리점 아님) */
+  const dealerRank = (vid?: string) => (sites.data.find((x) => x.id === d.siteId)?.dealerIds ?? []).indexOf(vid ?? '\u0000') + 1;
+  const DealerChip = ({ vid }: { vid?: string }) => (dealerRank(vid) ? <span className="chip ml-1 bg-teal-50 text-[10.5px] text-teal-700">대리점 {dealerRank(vid)}순위</span> : null);
   const setLine = (key: string, patch: Partial<ReqLine>) => setD((x) => x && { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
-  /** 단가 자동: 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
+  /** 단가 자동: 현장 지정단가 → 현장 대리점(우선순위) → 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
   const suggest = (l: ReqLine): Partial<ReqLine> => {
     if (!l.itemName) return {};
     // 현장 지정단가가 맨 먼저
     const fp = pickFixedPrice(priceList.data, l.itemName, l.spec, d.siteId, l.vendorId || undefined);
     if (fp) return { orderPrice: fp.price, priceSource: '지정단가', unit: l.unit || fp.unit, ...(!l.vendorId ? { vendorId: fp.vendorId, vendorName: fp.vendorName } : {}) };
+    // 현장 대리점 (우선순위 순): 단가관리시스템 단가 → ERP 품목·단가. 거래선을 이미 다른 업체로 골랐으면 건너뜀
+    const dealers = (sites.data.find((x) => x.id === d.siteId)?.dealerIds ?? []).map((id) => vendors.data.find((v) => v.id === id)).filter((v): v is Vendor => !!v);
+    for (const dv of l.vendorId ? dealers.filter((v) => v.id === l.vendorId) : dealers) {
+      const pm = findPrices(prices.rows, l.itemName, l.spec).find((p) => priceVendorIs(p, dv));
+      if (pm) return { orderPrice: pm.buyPrice, priceSource: '대리점', unit: l.unit || pm.unit, ...(!l.vendorId ? { vendorId: dv.id, vendorName: dv.name } : {}) };
+      const de = pickListPrice(priceList.data, l.itemName, l.spec, d.siteId, dv.id);
+      if (de && de.vendorId === dv.id) return { orderPrice: de.price, priceSource: '대리점', unit: l.unit || de.unit, ...(!l.vendorId ? { vendorId: dv.id, vendorName: dv.name } : {}) };
+    }
     const ip = invoicePrice(l.itemName, l.spec, d.siteId);
     if (ip) {
       const u = lists.cat.get(`${normItem(l.itemName)}|${normSpec(l.spec)}`)?.u;
@@ -401,7 +412,7 @@ export default function ReqEdit() {
   };
   /** 품명·규격은 목록에서 고른 값만. 바꾸면 자동 단가는 다시 찾는다 */
   const resetAuto = (l: ReqLine): Partial<ReqLine> => ({
-    ...(l.priceSource === '지정단가' || l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {}),
+    ...(l.priceSource === '지정단가' || l.priceSource === '대리점' || l.priceSource === '계산서' || l.priceSource === 'ERP단가' || l.priceSource === '단가표' || l.priceSource === '직전발주' ? { orderPrice: 0, priceSource: undefined } : {}),
     // 품명·규격이 바뀌면 세대 청구 값도 다시
     ...(l.hhCount != null ? { hhCount: undefined, hhType: undefined, hhPer: undefined, hhUnit: undefined } : {}),
   });
@@ -1780,7 +1791,7 @@ export default function ReqEdit() {
                             </button>
                           )}
                         </div>
-                        {l.priceSource && <div className={`text-right text-[10px] ${l.priceSource === '지정단가' ? 'font-semibold text-violet-700' : 'text-muted'}`}>{l.priceSource}</div>}
+                        {l.priceSource && <div className={`text-right text-[10px] ${l.priceSource === '지정단가' ? 'font-semibold text-violet-700' : l.priceSource === '대리점' ? 'font-semibold text-teal-700' : 'text-muted'}`}>{l.priceSource}</div>}
                       </td>
                       <td className="num bg-amber-soft/40 pt-2">
                         <span className="fit-text">{won(lineAmount({ ...l, orderQty: l.orderQty || l.reqQty }))}</span>
@@ -2123,7 +2134,10 @@ export default function ReqEdit() {
                     <tbody>
                       {erpRows.map((p) => (
                         <tr key={p.id} className={priceValid(p) ? '' : 'text-muted'}>
-                          <td>{p.vendorName}</td>
+                          <td>
+                            {p.vendorName}
+                            <DealerChip vid={p.vendorId} />
+                          </td>
                           <td className="text-muted">{p.maker}</td>
                           <td>{p.fixed ? <span className="chip bg-violet-100 text-violet-800">현장 지정단가</span> : p.siteName ? <span className="chip bg-amber-soft text-amber-800">이 현장</span> : <span className="text-[12px] text-muted">공통</span>}</td>
                           <td className="num">{p.listPrice ? won(p.listPrice) : ''}</td>
@@ -2162,6 +2176,7 @@ export default function ReqEdit() {
                             <td>
                               {p.vendorName}
                               {!v && <span className="ml-1 text-[11px] text-amber-700">(ERP 업체 없음)</span>}
+                              <DealerChip vid={v?.id} />
                             </td>
                             <td className="text-muted">{p.maker}</td>
                             <td className="num">{won(p.listPrice)}</td>

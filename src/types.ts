@@ -61,6 +61,7 @@ export interface Site {
   orderDisplayName?: string; // 발주서 '현장' 칸 표기
   allowReqExcel?: boolean; // 현장 사용자(소장·담당)에게 '청구서 엑셀 불러오기' 허용
   telegramChatId?: string; // 현장 단톡방 (발주 발송·입고 등록 알림)
+  dealerIds?: string[]; // 대리점 (우선순위 순 업체 id) — 구매청구 단가 불러올 때 지정단가 다음으로 먼저
   active: boolean;
   createdAt?: number;
 }
@@ -240,7 +241,7 @@ export interface ReqLine {
   bonLen?: number; // 이 줄만 배관 1본 길이(m) 지정 (0 = 본수 표시 안 함, 없으면 품명으로 자동)
   orderQty: number; // 발주수량 (본사 작성)
   orderPrice: number; // 단가 (본사 작성)
-  priceSource?: '지정단가' | '계산서' | 'ERP단가' | '단가표' | '직전발주' | '직접입력' | '엑셀';
+  priceSource?: '지정단가' | '대리점' | '계산서' | 'ERP단가' | '단가표' | '직전발주' | '직접입력' | '엑셀';
   vendorId?: string; // 거래선
   vendorName?: string;
   remark?: string; // 비고 (청구 내용)
