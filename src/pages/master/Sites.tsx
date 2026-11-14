@@ -5,7 +5,7 @@ import { useSiteCategories, useSites, useVendors } from '../../lib/hooks';
 import { nameKey } from '../../lib/normalize';
 import CrudTable, { toList } from '../../components/CrudTable';
 import { errMsg, Modal, PageHeader, useToast } from '../../components/ui';
-import type { Site, Vendor } from '../../types';
+import type { DealerRule, Site, SiteCategory, Vendor } from '../../types';
 import TelegramChatFinder from '../../components/TelegramChatFinder';
 
 const FIELDS = [
@@ -87,7 +87,14 @@ export default function Sites() {
             label: '대리점',
             render: (s) => (
               <button className="text-left text-[12px] hover:underline" onClick={(e) => (e.stopPropagation(), setDealerSite(s))} title="구매청구 단가 불러올 때 먼저 쓰는 업체 (우선순위)">
-                {s.dealerIds?.length ? s.dealerIds.map((id, i) => `${i + 1}.${vName(id)}`).join(' ') : <span className="text-muted">+ 지정</span>}
+                {s.dealerRules?.length || s.dealerIds?.length ? (
+                  <span>
+                    {s.dealerRules?.length ? <span className="chip mr-1 bg-teal-50 text-teal-700">분류별 {s.dealerRules.length}묶음</span> : null}
+                    {s.dealerIds?.length ? `기본: ${s.dealerIds.map((id, i) => `${i + 1}.${vName(id)}`).join(' ')}` : ''}
+                  </span>
+                ) : (
+                  <span className="text-muted">+ 지정</span>
+                )}
               </button>
             ),
           },
@@ -166,29 +173,66 @@ export default function Sites() {
           },
         }}
       />
-      {dealerSite && <DealerModal site={dealerSite} vendors={vendors.data} onClose={() => setDealerSite(null)} />}
+      {dealerSite && <DealerModal site={dealerSite} vendors={vendors.data} cats={cats.data} onClose={() => setDealerSite(null)} />}
     </div>
   );
 }
 
-/** 현장 대리점 지정 (우선순위) */
-function DealerModal({ site, vendors, onClose }: { site: Site; vendors: Vendor[]; onClose: () => void }) {
-  const toast = useToast();
-  const [ids, setIds] = useState<string[]>(site.dealerIds ?? []);
-  const [busy, setBusy] = useState(false);
+/** 순위 목록 편집 (업체 추가·↑↓·빼기) */
+function RankList({ ids, setIds, vendors }: { ids: string[]; setIds: (v: string[]) => void; vendors: Vendor[] }) {
   const opts = vendors.filter((v) => v.active !== false && !ids.includes(v.id)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-  const move = (i: number, d: number) => setIds((x) => {
-    const n = [...x];
+  const move = (i: number, d: number) => {
     const j = i + d;
-    if (j < 0 || j >= n.length) return x;
+    if (j < 0 || j >= ids.length) return;
+    const n = [...ids];
     [n[i], n[j]] = [n[j], n[i]];
-    return n;
-  });
+    setIds(n);
+  };
+  return (
+    <div>
+      {ids.length > 0 && (
+        <ol className="mb-1.5 divide-y divide-line rounded-lg border border-line bg-white">
+          {ids.map((id, i) => (
+            <li key={id} className="flex items-center gap-2 px-2.5 py-1.5 text-[13px]">
+              <span className="w-11 text-[12px] font-bold text-amber-700">{i + 1}순위</span>
+              <span className="flex-1 font-medium">{vendors.find((v) => v.id === id)?.name ?? '(삭제된 업체)'}</span>
+              <button className="btn-ghost h-6 px-1.5" disabled={!i} onClick={() => move(i, -1)} title="위로">↑</button>
+              <button className="btn-ghost h-6 px-1.5" disabled={i === ids.length - 1} onClick={() => move(i, 1)} title="아래로">↓</button>
+              <button className="btn-ghost h-6 px-1.5 text-red-600" onClick={() => setIds(ids.filter((y) => y !== id))} title="빼기">✕</button>
+            </li>
+          ))}
+        </ol>
+      )}
+      <select className="input h-8 text-[12.5px]" value="" onChange={(e) => e.target.value && setIds([...ids, e.target.value])}>
+        <option value="">+ 업체 추가{ids.length ? ` (${ids.length + 1}순위)` : ' (1순위)'}</option>
+        {opts.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** 현장 대리점 지정: 자재분류별 (우선순위) + 기본 */
+function DealerModal({ site, vendors, cats, onClose }: { site: Site; vendors: Vendor[]; cats: SiteCategory[]; onClose: () => void }) {
+  const toast = useToast();
+  const [rules, setRules] = useState<DealerRule[]>(site.dealerRules?.length ? site.dealerRules.map((r) => ({ catIds: [...r.catIds], dealerIds: [...r.dealerIds] })) : []);
+  const [base, setBase] = useState<string[]>(site.dealerIds ?? []);
+  const [busy, setBusy] = useState(false);
+  const [openCat, setOpenCat] = useState<number | null>(rules.length ? null : null);
+  const siteCats = cats.filter((c) => c.siteId === site.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'ko'));
+  const catName = (id: string) => siteCats.find((c) => c.id === id)?.name ?? '(삭제된 분류)';
+  const usedBy = (cid: string) => rules.findIndex((r) => r.catIds.includes(cid));
+  const setRule = (i: number, r: DealerRule) => setRules((x) => x.map((y, j) => (j === i ? r : y)));
+
   const save = async () => {
+    const clean = rules.filter((r) => r.catIds.length && r.dealerIds.length);
     setBusy(true);
     try {
-      await commitBatch([{ type: 'set', col: C.sites, id: site.id, data: { dealerIds: ids } }]);
-      await audit('현장 대리점 지정', site.id, { dealerIds: ids });
+      await commitBatch([{ type: 'set', col: C.sites, id: site.id, data: { dealerRules: clean, dealerIds: base } }]);
+      await audit('현장 대리점 지정', site.id, { rules: clean.length, base: base.length });
       toast(`${site.name} 대리점을 저장했습니다.`);
       onClose();
     } catch (e) {
@@ -197,54 +241,83 @@ function DealerModal({ site, vendors, onClose }: { site: Site; vendors: Vendor[]
       setBusy(false);
     }
   };
+
   return (
     <Modal
       open
+      wide
       title={`대리점 지정 · ${site.name}`}
       onClose={onClose}
       footer={
         <>
-          <button className="btn-ghost" onClick={onClose}>
-            취소
-          </button>
-          <button className="btn-primary" disabled={busy} onClick={save}>
-            저장
-          </button>
+          <button className="btn-ghost" onClick={onClose}>취소</button>
+          <button className="btn-primary" disabled={busy} onClick={save}>저장</button>
         </>
       }
     >
       <p className="mb-3 text-[12.5px] leading-5 text-muted">
-        구매청구서에서 품명으로 단가를 불러올 때 <b>현장 지정단가 다음</b>으로 이 업체들 단가를 먼저 찾습니다. 1순위 업체에 단가가 없으면 2순위 … 순서로 찾고, 어디에도 없으면 지금처럼 계산서 → 단가표 → 직전 발주 순서입니다. (단가관리시스템 단가 → ERP 품목·단가 순)
+        구매청구서에서 단가를 불러올 때 <b>현장 지정단가 다음</b>으로 이 업체들 단가를 먼저 찾습니다. 줄의 <b>자재분류</b>에 맞는 대리점을 1순위부터 찾고(단가관리시스템 → ERP 품목·단가), 없으면 지금처럼 계산서 → 단가표 → 직전 발주 순서입니다.
       </p>
-      {ids.length ? (
-        <ol className="mb-3 divide-y divide-line rounded-lg border border-line">
-          {ids.map((id, i) => (
-            <li key={id} className="flex items-center gap-2 px-3 py-2 text-[13px]">
-              <span className="w-12 font-bold text-amber-700">{i + 1}순위</span>
-              <span className="flex-1 font-medium">{vendors.find((v) => v.id === id)?.name ?? '(삭제된 업체)'}</span>
-              <button className="btn-ghost h-7 px-2" disabled={!i} onClick={() => move(i, -1)} title="위로">
-                ↑
-              </button>
-              <button className="btn-ghost h-7 px-2" disabled={i === ids.length - 1} onClick={() => move(i, 1)} title="아래로">
-                ↓
-              </button>
-              <button className="btn-ghost h-7 px-2 text-red-600" onClick={() => setIds((x) => x.filter((y) => y !== id))} title="빼기">
-                ✕
-              </button>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <div className="mb-3 rounded-lg border border-dashed border-line px-3 py-4 text-center text-[12.5px] text-muted">지정한 대리점이 없습니다.</div>
-      )}
-      <select className="input" value="" onChange={(e) => e.target.value && setIds((x) => [...x, e.target.value])}>
-        <option value="">+ 대리점 추가 (업체 고르기)</option>
-        {opts.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name}
-          </option>
+
+      <div className="space-y-3">
+        {rules.map((r, i) => (
+          <div key={i} className="rounded-xl border border-line bg-canvas/60 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <b className="text-[13px]">자재분류</b>
+              <div className="flex flex-1 flex-wrap gap-1">
+                {r.catIds.map((cid) => (
+                  <span key={cid} className="chip bg-navy-950 text-white">
+                    {catName(cid)}
+                    <button className="ml-1 text-white/60 hover:text-white" onClick={() => setRule(i, { ...r, catIds: r.catIds.filter((x) => x !== cid) })}>✕</button>
+                  </span>
+                ))}
+                <button className="chip border border-dashed border-line bg-white text-muted hover:text-ink" onClick={() => setOpenCat(openCat === i ? null : i)}>
+                  {openCat === i ? '분류 고르기 닫기' : '+ 분류 고르기'}
+                </button>
+              </div>
+              <button className="btn-ghost h-7 px-2 text-[12px] text-red-600" onClick={() => setRules((x) => x.filter((_, j) => j !== i))}>묶음 삭제</button>
+            </div>
+            {openCat === i && (
+              <div className="mb-2 grid max-h-48 grid-cols-2 gap-1 overflow-y-auto rounded-lg border border-line bg-white p-2 sm:grid-cols-3">
+                {siteCats.map((c) => {
+                  const u = usedBy(c.id);
+                  const on = r.catIds.includes(c.id);
+                  return (
+                    <label key={c.id} className={`flex items-center gap-1.5 text-[12.5px] ${u >= 0 && u !== i ? 'text-muted' : ''}`} title={u >= 0 && u !== i ? '다른 묶음에 들어 있습니다 (고르면 이 묶음으로 옮깁니다)' : ''}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          setRules((x) =>
+                            x.map((y, j) =>
+                              j === i ? { ...y, catIds: on ? y.catIds.filter((z) => z !== c.id) : [...y.catIds, c.id] } : { ...y, catIds: y.catIds.filter((z) => z !== c.id) },
+                            ),
+                          )
+                        }
+                      />
+                      {c.name}
+                      {u >= 0 && u !== i && <span className="text-[10.5px]">(묶음 {u + 1})</span>}
+                    </label>
+                  );
+                })}
+                {!siteCats.length && <div className="col-span-full text-[12px] text-muted">이 현장에 투입집계 분류가 없습니다.</div>}
+              </div>
+            )}
+            <RankList ids={r.dealerIds} setIds={(v) => setRule(i, { ...r, dealerIds: v })} vendors={vendors} />
+          </div>
         ))}
-      </select>
+        <button className="btn-ghost h-9 w-full border-dashed" onClick={() => (setRules((x) => [...x, { catIds: [], dealerIds: [] }]), setOpenCat(rules.length))}>
+          + 자재분류별 대리점 추가
+        </button>
+
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+          <div className="mb-2 text-[13px]">
+            <b>기본 대리점</b> <span className="text-[12px] text-muted">— 자재분류를 아직 안 골랐거나, 위에서 따로 정하지 않은 분류</span>
+          </div>
+          <RankList ids={base} setIds={setBase} vendors={vendors} />
+        </div>
+      </div>
+      <p className="mt-2 text-[11.5px] text-muted">분류도 업체도 비어 있는 묶음은 저장할 때 빠집니다.</p>
     </Modal>
   );
 }

@@ -45,6 +45,12 @@ export interface AccountRequest {
   rejectReason?: string;
 }
 
+/** 현장 자재분류별 대리점: 이 분류들의 품목은 이 업체 순서로 단가를 먼저 찾는다 */
+export interface DealerRule {
+  catIds: string[]; // 현장 투입집계 분류 id
+  dealerIds: string[]; // 우선순위 순 업체 id
+}
+
 export interface Site {
   id: string;
   code: string; // 현장코드 (예: MS-01)
@@ -61,7 +67,8 @@ export interface Site {
   orderDisplayName?: string; // 발주서 '현장' 칸 표기
   allowReqExcel?: boolean; // 현장 사용자(소장·담당)에게 '청구서 엑셀 불러오기' 허용
   telegramChatId?: string; // 현장 단톡방 (발주 발송·입고 등록 알림)
-  dealerIds?: string[]; // 대리점 (우선순위 순 업체 id) — 구매청구 단가 불러올 때 지정단가 다음으로 먼저
+  dealerIds?: string[]; // 기본 대리점 (분류 미지정·분류별 지정이 없는 분류) — 우선순위 순 업체 id
+  dealerRules?: DealerRule[]; // 자재분류별 대리점 (우선순위 순)
   active: boolean;
   createdAt?: number;
 }

@@ -16,6 +16,7 @@ import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList
 import PickInput from '../../components/PickInput';
 import ReqImportModal from './ReqImportModal';
 import ReqAttachments from './ReqAttachments';
+import { dealersFor } from '../../lib/dealers';
 import { dropKept, readKept, useReqKeeper } from '../../lib/reqKeeper';
 import { lumpCells } from '../../lib/lump';
 import { useAutoFit } from '../../lib/autoFit';
@@ -316,8 +317,9 @@ export default function ReqEdit() {
   };
 
   /** 현장 대리점 순위 (0 = 대리점 아님) */
-  const dealerRank = (vid?: string) => (sites.data.find((x) => x.id === d.siteId)?.dealerIds ?? []).indexOf(vid ?? '\u0000') + 1;
-  const DealerChip = ({ vid }: { vid?: string }) => (dealerRank(vid) ? <span className="chip ml-1 bg-teal-50 text-[10.5px] text-teal-700">대리점 {dealerRank(vid)}순위</span> : null);
+  const siteObj = sites.data.find((x) => x.id === d.siteId);
+  const dealerRank = (vid: string | undefined, catId?: string) => dealersFor(siteObj, catId).indexOf(vid ?? '\u0000') + 1;
+  const DealerChip = ({ vid, catId }: { vid?: string; catId?: string }) => (dealerRank(vid, catId) ? <span className="chip ml-1 bg-teal-50 text-[10.5px] text-teal-700">대리점 {dealerRank(vid, catId)}순위</span> : null);
   const setLine = (key: string, patch: Partial<ReqLine>) => setD((x) => x && { ...x, lines: x.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
   /** 단가 자동: 현장 지정단가 → 현장 대리점(우선순위) → 최신 계산서 단가(같은 현장 → 전체) → ERP 단가표(현장 예외 → 거래선 → 최저) → 단가관리 단가표 → 직전 발주단가 */
@@ -327,7 +329,7 @@ export default function ReqEdit() {
     const fp = pickFixedPrice(priceList.data, l.itemName, l.spec, d.siteId, l.vendorId || undefined);
     if (fp) return { orderPrice: fp.price, priceSource: '지정단가', unit: l.unit || fp.unit, ...(!l.vendorId ? { vendorId: fp.vendorId, vendorName: fp.vendorName } : {}) };
     // 현장 대리점 (우선순위 순): 단가관리시스템 단가 → ERP 품목·단가. 거래선을 이미 다른 업체로 골랐으면 건너뜀
-    const dealers = (sites.data.find((x) => x.id === d.siteId)?.dealerIds ?? []).map((id) => vendors.data.find((v) => v.id === id)).filter((v): v is Vendor => !!v);
+    const dealers = dealersFor(siteObj, l.siteCategoryId).map((id) => vendors.data.find((v) => v.id === id)).filter((v): v is Vendor => !!v);
     for (const dv of l.vendorId ? dealers.filter((v) => v.id === l.vendorId) : dealers) {
       const pm = findPrices(prices.rows, l.itemName, l.spec).find((p) => priceVendorIs(p, dv));
       if (pm) return { orderPrice: pm.buyPrice, priceSource: '대리점', unit: l.unit || pm.unit, ...(!l.vendorId ? { vendorId: dv.id, vendorName: dv.name } : {}) };
@@ -799,6 +801,12 @@ export default function ReqEdit() {
       const patch = { siteCategoryId: c?.id, catAuto: undefined };
       let lines = x.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
       if (c) lines = fillBetween(lines, idx, (l) => l.siteCategoryId ?? '', patch, (l) => !isLocked(l));
+      // 분류가 바뀌면 대리점이 달라질 수 있다: 대리점 단가로 불러온 줄은 다시 불러온다
+      lines = lines.map((l, i) => {
+        if (l.priceSource !== '대리점' || isLocked(l) || l.siteCategoryId === x.lines[i]?.siteCategoryId) return l;
+        const base = { ...l, vendorId: undefined, vendorName: undefined, orderPrice: 0, priceSource: undefined };
+        return { ...base, ...suggest(base) };
+      });
       return { ...x, lines };
     });
   };
@@ -2136,7 +2144,7 @@ export default function ReqEdit() {
                         <tr key={p.id} className={priceValid(p) ? '' : 'text-muted'}>
                           <td>
                             {p.vendorName}
-                            <DealerChip vid={p.vendorId} />
+                            <DealerChip vid={p.vendorId} catId={l.siteCategoryId} />
                           </td>
                           <td className="text-muted">{p.maker}</td>
                           <td>{p.fixed ? <span className="chip bg-violet-100 text-violet-800">현장 지정단가</span> : p.siteName ? <span className="chip bg-amber-soft text-amber-800">이 현장</span> : <span className="text-[12px] text-muted">공통</span>}</td>
@@ -2176,7 +2184,7 @@ export default function ReqEdit() {
                             <td>
                               {p.vendorName}
                               {!v && <span className="ml-1 text-[11px] text-amber-700">(ERP 업체 없음)</span>}
-                              <DealerChip vid={v?.id} />
+                              <DealerChip vid={v?.id} catId={l.siteCategoryId} />
                             </td>
                             <td className="text-muted">{p.maker}</td>
                             <td className="num">{won(p.listPrice)}</td>
