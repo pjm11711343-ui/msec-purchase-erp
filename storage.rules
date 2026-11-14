@@ -1,0 +1,25 @@
+rules_version = '2';
+// 구매관리 ERP 첨부파일 (Firebase 콘솔 > Storage > 규칙 에 게시)
+// 경로: erp_req/{청구서id}/{파일id}_{이름} — 청구서·파일 id는 추측할 수 없는 무작위 값
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedInStaff() {
+      // 로그인한 사내 계정만 (업체 포털 계정 vendor-…@ 은 제외)
+      return request.auth != null && !request.auth.token.email.matches('^vendor-.*');
+    }
+    match /erp_req/{reqId}/{fileName} {
+      allow read: if signedInStaff();
+      allow create: if signedInStaff()
+        && request.resource.size < 50 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('application/pdf')
+            || request.resource.contentType.matches('application/vnd\\.(ms-excel|openxmlformats-officedocument\\.spreadsheetml).*')
+            || request.resource.contentType.matches('text/csv')
+            || request.resource.contentType == 'application/octet-stream');
+      allow delete: if signedInStaff();
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -380,6 +380,7 @@ export default function ReqList() {
                         {r.docNo || '(번호 없음)'}
                       </Link>
                       {isNewReq(r, seenAtOpen.current, profile?.name) && <span className="chip ml-1 bg-red-500 text-[10.5px] text-white">새</span>}
+                      {(r.attachments?.length ?? 0) > 0 && <span className="ml-1 text-[11px] text-muted" title="첨부파일">📎{r.attachments!.length}</span>}
                     </td>
                     <td>{r.siteName}</td>
                     <td className="whitespace-nowrap">{r.processName ? <span className="chip bg-navy-950/5 text-navy-900">{r.processName}</span> : <span className="text-muted">-</span>}</td>

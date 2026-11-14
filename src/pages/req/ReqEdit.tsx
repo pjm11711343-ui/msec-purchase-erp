@@ -15,6 +15,7 @@ import { Empty, errMsg, Field, Modal, NumInput, PageHeader, useToast } from '../
 import { isCeo, isMyTurn, myDecideStep, nextActive, StatusChip } from './ReqList';
 import PickInput from '../../components/PickInput';
 import ReqImportModal from './ReqImportModal';
+import ReqAttachments from './ReqAttachments';
 import { dropKept, readKept, useReqKeeper } from '../../lib/reqKeeper';
 import { lumpCells } from '../../lib/lump';
 import { useAutoFit } from '../../lib/autoFit';
@@ -482,6 +483,9 @@ export default function ReqEdit() {
         }
       }
       const data = build({ ...patch, history: [...d.history, { at: Date.now(), by: profile?.name ?? '', action, ...(comment ? { comment } : {}) }] });
+      // 첨부 목록은 첨부 칸에서 바로 저장되므로, 화면에 들고 있던 예전 목록으로 덮어쓰지 않는다
+      const liveAtt = reqs.data.find((r) => r.id === rid)?.attachments;
+      if (liveAtt) data.attachments = liveAtt;
       await commitBatch([{ type: 'set', col: C.requisitions, id: rid, data, merge: false }]);
       await audit(`구매청구 ${action}`, rid, { docNo: data.docNo, site: data.siteName });
       toast(okMsg);
@@ -1939,6 +1943,24 @@ export default function ReqEdit() {
           </div>
         </>
       )}
+
+      {(() => {
+        // 첨부: 작성중·반려 = 작성자 / 결재 중 = 작성자·결재선 / 자재부·관리자 = 항상 (휴지통 제외)
+        const inLine = d.steps.some((s) => s.userId && s.userId === profile?.id);
+        const mineReq = d.createdBy === profile?.id;
+        const canAdd = !readOnly && !inTrash && (isOffice || ((d.status === 'draft' || d.status === 'rejected') && mineReq) || (d.status === 'pending' && (mineReq || inLine)));
+        const live = (d.id && stored?.attachments) || d.attachments || [];
+        return (
+          <ReqAttachments
+            reqId={d.id}
+            list={live}
+            canAdd={canAdd}
+            canDelete={(a) => !inTrash && (isOffice || (a.by === profile?.id && d.status !== 'approved'))}
+            me={{ id: profile?.id ?? '', name: profile?.name ?? '' }}
+            onChange={(next) => setD((x) => x && { ...x, attachments: next })}
+          />
+        );
+      })()}
 
       {(myTurn || (d.opinions?.length ?? 0) > 0) && (
         <div className="card mt-4 px-4 py-3">

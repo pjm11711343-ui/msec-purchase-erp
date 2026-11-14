@@ -98,4 +98,9 @@ export async function restoreReq(r: Requisition, who: string) {
 /** 휴지통에서 영구 삭제 (관리자) */
 export async function purgeReq(r: Requisition) {
   await commitBatch([{ type: 'delete', col: C.requisitions, id: r.id }]);
+  // 첨부파일도 함께 지운다 (실패해도 청구서 삭제는 끝난 것)
+  if (r.attachments?.length) {
+    const { removeAttachmentFile } = await import('./attachments');
+    await Promise.all(r.attachments.map((a) => removeAttachmentFile(a.path).catch(() => undefined)));
+  }
 }

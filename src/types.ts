@@ -293,11 +293,24 @@ export interface ReqOpinion {
   text: string;
 }
 
+/** 청구서 첨부파일 (파일 자체는 Firebase Storage, 여기는 목록만) */
+export interface ReqAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  path: string; // Storage 경로 erp_req/{청구서}/{id}_{이름}
+  by: string;
+  byName: string;
+  at: number;
+}
+
 export interface Requisition {
   id: string;
   siteId: string;
   siteName: string;
   docNo: string; // 결의번호 (직접 입력)
+  attachments?: ReqAttachment[]; // 첨부파일 (엑셀·그림·PDF)
   requestDate: string; // YYYY-MM-DD
   purpose?: string; // 사용 목적 (화면 위쪽 첫 칸, 엑셀 B7 제목 줄)
   usePurpose?: string; // 사용 위치·공정 (청구서 1칸, 엑셀 T8). 없으면 줄별 사용 위치(예전 자료)를 모아 보여줌

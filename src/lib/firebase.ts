@@ -1,5 +1,6 @@
 import { initializeApp, getApps, type FirebaseOptions } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from 'firebase/firestore';
 import fileConfig from '../config/firebase-config.json';
 
@@ -33,6 +34,8 @@ function makeDb(): Firestore {
   }
 }
 export const db = makeDb();
+/** 첨부파일 저장소 (구매청구 첨부) */
+export const storage = getStorage(app);
 
 /** 단가관리시스템 단가 컬렉션 이름 (vendors/{업체}/prices 아래에 있으면 컬렉션 그룹으로 읽는다) */
 export const PRICE_COLLECTION: string = env.VITE_PRICE_COLLECTION || 'prices';
