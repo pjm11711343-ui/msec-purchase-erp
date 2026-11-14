@@ -241,6 +241,80 @@ export default function ReqEdit() {
     return { items, specs, units, unitsItem, cat, requested };
   }, [catalog.items, prices.rows, reqs.data, itemEntries.data, priceList.data, baseSheets.data]);
   const itemOptions = useMemo(() => [...lists.items.values()].sort((a, b) => a.localeCompare(b, 'ko')), [lists]);
+
+  /** 거래선별·자재분류별 품목 (normItem → normSpec 모음): 거래선·분류를 먼저 고르면 품명 목록을 좁힌다 */
+  type ItemSet = Map<string, Set<string>>;
+  const addTo = (m: Map<string, ItemSet>, key: string | undefined, item: string, spec: string) => {
+    if (!key || !item) return;
+    const ni = normItem(item);
+    if (!ni) return;
+    const im = m.get(key) ?? new Map<string, Set<string>>();
+    im.set(ni, (im.get(ni) ?? new Set<string>()).add(normSpec(spec ?? '')));
+    m.set(key, im);
+  };
+  const vendorItems = useMemo(() => {
+    const m = new Map<string, ItemSet>();
+    priceList.data.forEach((p) => p.vendorId && p.price > 0 && priceValid(p) && addTo(m, p.vendorId, p.itemName, p.spec));
+    // 단가관리 단가표: 업체 이름·사업자번호로 ERP 업체를 찾는다 (같은 업체는 한 번만 찾음)
+    const vmap = new Map<string, string | undefined>();
+    prices.rows.forEach((p) => {
+      const k = `${p.vendorName}|${(p as { bizNo?: string }).bizNo ?? ''}`;
+      if (!vmap.has(k)) vmap.set(k, vendors.data.find((v) => priceVendorIs(p, v))?.id);
+      addTo(m, vmap.get(k), p.itemName, p.spec);
+    });
+    catalog.items.forEach((c) => {
+      addTo(m, c.last?.vid, c.i, c.s);
+      Object.values(c.site ?? {}).forEach((x) => addTo(m, x.vid, c.i, c.s));
+    });
+    reqs.data.forEach((r) => r.lines.forEach((l) => addTo(m, l.vendorId, l.itemName, l.spec)));
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceList.data, prices.rows, catalog.items, reqs.data, vendors.data]);
+  const siteIdNow = d?.siteId;
+  const catItems = useMemo(() => {
+    const m = new Map<string, ItemSet>();
+    if (!siteIdNow) return m;
+    const mine = cats.data.filter((c) => c.siteId === siteIdNow);
+    const mineIds = new Set(mine.map((c) => c.id));
+    // 품목에 정해진 표준분류 → 이 현장 분류
+    for (const [ni, disp] of lists.items) {
+      const specs = lists.specs.get(ni);
+      for (const sp of specs ? [...specs.values()] : ['']) addTo(m, siteCatOfStd(itemStd(disp, sp).stdCatId, mine, stdCats.data), disp, sp);
+    }
+    catalog.items.forEach((c) => c.sc && mineIds.has(c.sc) && addTo(m, c.sc, c.i, c.s));
+    reqs.data.forEach((r) => r.siteId === siteIdNow && r.lines.forEach((l) => addTo(m, l.siteCategoryId, l.itemName, l.spec)));
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteIdNow, cats.data, lists, catalog.items, reqs.data, itemStd, stdCats.data]);
+  /** 이 줄에서 고를 수 있는 품목 (거래선·분류 둘 다면 둘 다 맞는 것). 하나도 없으면 null = 전체 */
+  const allowedFor = (l: { vendorId?: string; siteCategoryId?: string }): ItemSet | null => {
+    const sets = [l.vendorId ? vendorItems.get(l.vendorId) : undefined, l.siteCategoryId ? catItems.get(l.siteCategoryId) : undefined].filter((x): x is ItemSet => !!x && x.size > 0);
+    if (!sets.length) return null;
+    if (sets.length === 1) return sets[0];
+    const out: ItemSet = new Map();
+    for (const [ni, sp] of sets[0]) {
+      const o = sets[1].get(ni);
+      if (o) out.set(ni, new Set([...sp].filter((x) => o.has(x)).concat(sp.size && o.size && ![...sp].some((x) => o.has(x)) ? [...sp] : [])));
+    }
+    return out.size ? out : sets[0];
+  };
+  const itemOptionsFor = (l: ReqLine) => {
+    const a = allowedFor(l);
+    if (!a) return itemOptions;
+    const f = itemOptions.filter((o) => a.has(normItem(o)));
+    return f.length ? f : itemOptions;
+  };
+  const specOptionsFor = (l: ReqLine) => {
+    const all = specOptions(l.itemName);
+    const sp = allowedFor(l)?.get(normItem(l.itemName));
+    if (!sp || !sp.size || (sp.size === 1 && sp.has(''))) return all;
+    const f = all.filter((x) => sp.has(normSpec(x)));
+    return f.length ? f : all;
+  };
+  const narrowLabel = (l: ReqLine) => {
+    if (!allowedFor(l)) return '';
+    return [l.vendorId && vendorItems.get(l.vendorId)?.size ? l.vendorName : '', l.siteCategoryId && catItems.get(l.siteCategoryId)?.size ? cats.data.find((c) => c.id === l.siteCategoryId)?.name : ''].filter(Boolean).join('·');
+  };
   const itemSet = useMemo(() => new Set(lists.items.keys()), [lists]);
   const sizeOf = (s: string) => {
     const m = s.match(/(\d+(?:\.\d+)?)/);
@@ -1670,9 +1744,9 @@ export default function ReqEdit() {
                           <PickInput
                             className="w-full"
                             value={l.itemName}
-                            options={itemOptions}
+                            options={itemOptionsFor(l)}
                             invalid={!!l.itemName && !itemSet.has(normItem(l.itemName))}
-                            placeholder="품명 선택 ▾"
+                            placeholder={narrowLabel(l) ? `${narrowLabel(l)} 품목 ▾` : '품명 선택 ▾'}
                             onPick={(v) => pickItem(l.key, v)}
                             onPasteRows={(rows) => pasteDown(l.key, 'item', rows)}
                           />
@@ -1726,7 +1800,7 @@ export default function ReqEdit() {
                           <PickInput
                             className="w-full"
                             value={l.spec}
-                            options={specOptions(l.itemName)}
+                            options={specOptionsFor(l)}
                             invalid={!!l.spec && !specOk(l.itemName, l.spec)}
                             placeholder={l.itemName ? '규격 ▾' : '품명 먼저'}
                             onPick={(v) => pickSpec(l.key, l.itemName, v)}
